@@ -10,6 +10,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Hide dock icon for menu bar only app
         NSApp.setActivationPolicy(.accessory)
 
+        // Request notification permissions
+        Task {
+            await NotificationService.shared.requestPermissions()
+        }
+
         // Initialize tray menu
         trayMenuManager = TrayMenuManager()
         statusItem = trayMenuManager?.createTrayIcon()

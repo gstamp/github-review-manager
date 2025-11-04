@@ -153,6 +153,9 @@ class PRViewModel: ObservableObject {
     private let githubService = GitHubService.shared
     private let storageService = StorageService.shared
     private let authService = AuthService.shared
+    private let notificationService = NotificationService.shared
+    private var refreshTimer: Timer?
+    private let refreshInterval: TimeInterval = 5 * 60 // 5 minutes, matching cacheTTL
 
     var categoryGroups: [CategoryGroup] {
         // Group reviews by category
@@ -241,11 +244,64 @@ class PRViewModel: ObservableObject {
             // Filter out dismissed PRs
             userPRs = storageService.filterDismissed(prs)
             reviewRequests = storageService.filterDismissed(requests)
+
+            // Detect and notify about new reviews
+            do {
+                let newReviews = try await githubService.detectNewReviews()
+                for review in newReviews {
+                    notificationService.sendReviewNotification(
+                        prNumber: review.prNumber,
+                        prTitle: review.prTitle,
+                        reviewState: review.reviewState
+                    )
+                    // Mark review as seen after sending notification
+                    storageService.markReviewAsSeen(review.reviewId)
+                }
+            } catch {
+                // Don't fail the entire load if review detection fails
+                print("Error detecting new reviews: \(error)")
+            }
+
+            // Detect and notify about new review requests
+            do {
+                let newReviewRequests = try await githubService.detectNewReviewRequests()
+                for request in newReviewRequests {
+                    notificationService.sendReviewRequestNotification(
+                        prNumber: request.prNumber,
+                        prTitle: request.prTitle,
+                        category: request.reviewCategory
+                    )
+                    // Mark review request as seen after sending notification
+                    storageService.markReviewRequestAsSeen(request.prId)
+                }
+            } catch {
+                // Don't fail the entire load if review request detection fails
+                print("Error detecting new review requests: \(error)")
+            }
         } catch let err {
             error = err.localizedDescription
         }
 
         loading = false
+
+        // Start or restart automatic refresh timer
+        startRefreshTimer()
+    }
+
+    private func startRefreshTimer() {
+        // Invalidate existing timer if any
+        refreshTimer?.invalidate()
+
+        // Create new timer that fires every 5 minutes
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                await self?.loadData(forceRefresh: true)
+            }
+        }
+    }
+
+    deinit {
+        refreshTimer?.invalidate()
     }
 
     func dismissPR(_ prId: Int) async {

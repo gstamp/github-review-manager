@@ -102,9 +102,14 @@ class GitHubService {
                         login
                       }
                     }
-                    reviews(last: 1) {
+                    reviews(last: 100) {
                       nodes {
+                        id
                         state
+                        author {
+                          login
+                        }
+                        createdAt
                       }
                     }
                     timelineItems(itemTypes: READY_FOR_REVIEW_EVENT, last: 1) {
@@ -255,9 +260,14 @@ class GitHubService {
                         login
                       }
                     }
-                    reviews(last: 1) {
+                    reviews(last: 100) {
                       nodes {
+                        id
                         state
+                        author {
+                          login
+                        }
+                        createdAt
                       }
                     }
                     timelineItems(itemTypes: REVIEW_REQUESTED_EVENT, last: 50) {
@@ -343,7 +353,9 @@ class GitHubService {
                 // If no matching events found but PR was returned by search, assume user is requested
                 // Use username as fallback since search query ensures user is requested
                 let requestedReviewer = mostRecentEvent?.requestedReviewer?.login ?? username
-                let reviewRequestedAt = mostRecentEvent?.createdAt
+                // Fall back to most recent event if no exact match found, since search query guarantees user is requested
+                // If no events at all, fall back to PR creation date
+                let reviewRequestedAt = mostRecentEvent?.createdAt ?? sortedEvents.first?.createdAt ?? node.createdAt
 
                 // Use actor (who requested the review) for categorization
                 // If no matching event, use the most recent event's actor (even if it doesn't match username)
@@ -363,11 +375,8 @@ class GitHubService {
 
 
                 let daysWaiting: Double? = {
-                    guard let requestedAt = reviewRequestedAt else {
-                        return nil
-                    }
                     let formatter = ISO8601DateFormatter()
-                    guard let date = formatter.date(from: requestedAt) else {
+                    guard let date = formatter.date(from: reviewRequestedAt) else {
                         return nil
                     }
                     return (Date().timeIntervalSince1970 - date.timeIntervalSince1970) / (60 * 60 * 24)
@@ -567,6 +576,294 @@ class GitHubService {
         cachedUserPRs = nil
         cachedReviewRequests = nil
     }
+
+    // MARK: - Review Detection
+
+    /// Detect new human reviews that haven't been seen before
+    func detectNewReviews() async throws -> [NewReview] {
+        guard token != nil else {
+            return []
+        }
+
+        let storageService = StorageService.shared
+        let seenReviewIds = storageService.loadSeenReviewIds()
+
+        // Get username for filtering
+        let username = try await getUsername()
+
+        // Fetch full PR data with reviews
+        let userPRsQuery = """
+        query($searchQuery: String!, $first: Int!) {
+          search(query: $searchQuery, type: ISSUE, first: $first) {
+            nodes {
+              ... on PullRequest {
+                id
+                number
+                title
+                url
+                reviews(last: 100) {
+                  nodes {
+                    id
+                    state
+                    author {
+                      login
+                    }
+                    createdAt
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+
+        let reviewRequestsQuery = """
+        query($searchQuery: String!, $first: Int!) {
+          search(query: $searchQuery, type: ISSUE, first: $first) {
+            nodes {
+              ... on PullRequest {
+                id
+                number
+                title
+                url
+                reviews(last: 100) {
+                  nodes {
+                    id
+                    state
+                    author {
+                      login
+                    }
+                    createdAt
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+
+        // Query for user PRs
+        let userPRVariables: [String: Any] = [
+            "searchQuery": "is:open is:pr author:\(username) archived:false",
+            "first": 100
+        ]
+
+        let userPRResponse: GraphQLResponse<SearchQuery<UserOpenPRNode>> = try await executeGraphQL(
+            query: userPRsQuery,
+            variables: userPRVariables
+        )
+
+        // Query for review requests
+        let reviewRequestVariables: [String: Any] = [
+            "searchQuery": "is:open is:pr review-requested:\(username) archived:false",
+            "first": 100
+        ]
+
+        let reviewRequestResponse: GraphQLResponse<SearchQuery<ReviewRequestNode>> = try await executeGraphQL(
+            query: reviewRequestsQuery,
+            variables: reviewRequestVariables
+        )
+
+        var newReviews: [NewReview] = []
+
+        // Process user PRs
+        for prNode in userPRResponse.data.search.nodes {
+            for review in prNode.reviews.nodes {
+                // Only process APPROVED, CHANGES_REQUESTED, COMMENTED
+                guard ["APPROVED", "CHANGES_REQUESTED", "COMMENTED"].contains(review.state) else {
+                    continue
+                }
+
+                // Check if review is from a human
+                guard let authorLogin = review.author?.login else {
+                    continue
+                }
+
+                let category = BotCategorizer.categorizeReviewer(authorLogin)
+                guard category == "human" else {
+                    continue
+                }
+
+                // Check if we've seen this review before
+                if !seenReviewIds.contains(review.id) {
+                    newReviews.append(NewReview(
+                        reviewId: review.id,
+                        prNumber: prNode.number,
+                        prTitle: prNode.title,
+                        reviewState: review.state
+                    ))
+                }
+            }
+        }
+
+        // Process review requests
+        for prNode in reviewRequestResponse.data.search.nodes {
+            for review in prNode.reviews.nodes {
+                // Only process APPROVED, CHANGES_REQUESTED, COMMENTED
+                guard ["APPROVED", "CHANGES_REQUESTED", "COMMENTED"].contains(review.state) else {
+                    continue
+                }
+
+                // Check if review is from a human
+                guard let authorLogin = review.author?.login else {
+                    continue
+                }
+
+                let category = BotCategorizer.categorizeReviewer(authorLogin)
+                guard category == "human" else {
+                    continue
+                }
+
+                // Check if we've seen this review before
+                if !seenReviewIds.contains(review.id) {
+                    newReviews.append(NewReview(
+                        reviewId: review.id,
+                        prNumber: prNode.number,
+                        prTitle: prNode.title,
+                        reviewState: review.state
+                    ))
+                }
+            }
+        }
+
+        return newReviews
+    }
+
+    /// Detect new review requests that haven't been seen before
+    func detectNewReviewRequests() async throws -> [NewReviewRequest] {
+        guard token != nil else {
+            return []
+        }
+
+        let storageService = StorageService.shared
+        let seenRequestIds = storageService.loadSeenReviewRequestIds()
+
+        // Get username for filtering
+        let username = try await getUsername()
+
+        // Use the same query as getReviewRequests to fetch review requests
+        let query = """
+        query($searchQuery: String!, $first: Int!) {
+          search(query: $searchQuery, type: ISSUE, first: $first) {
+            nodes {
+              ... on PullRequest {
+                id
+                number
+                title
+                url
+                author {
+                  login
+                }
+                repository {
+                  name
+                  owner {
+                    login
+                  }
+                }
+                timelineItems(itemTypes: REVIEW_REQUESTED_EVENT, last: 50) {
+                  nodes {
+                    ... on ReviewRequestedEvent {
+                      createdAt
+                      actor {
+                        ... on User {
+                          login
+                        }
+                        ... on Bot {
+                          login
+                        }
+                      }
+                      requestedReviewer {
+                        ... on User {
+                          login
+                        }
+                        ... on Bot {
+                          login
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+
+        let variables: [String: Any] = [
+            "searchQuery": "is:open is:pr review-requested:\(username) archived:false",
+            "first": 100
+        ]
+
+        let response: GraphQLResponse<SearchQuery<ReviewRequestNode>> = try await executeGraphQL(
+            query: query,
+            variables: variables
+        )
+
+        var newReviewRequests: [NewReviewRequest] = []
+
+        for node in response.data.search.nodes {
+            // Get PR ID (same hash method as in getReviewRequests)
+            let prId = node.id.stableHash()
+
+            // Skip if we've already seen this review request
+            if seenRequestIds.contains(prId) {
+                continue
+            }
+
+            // Sort timeline events to find requester for categorization
+            let sortedEvents = node.timelineItems.nodes.sorted { event1, event2 in
+                let date1 = ISO8601DateFormatter().date(from: event1.createdAt) ?? Date.distantPast
+                let date2 = ISO8601DateFormatter().date(from: event2.createdAt) ?? Date.distantPast
+                return date1 > date2
+            }
+
+            // Find the most recent review_requested event for this user
+            let reviewRequestedEvents = sortedEvents.filter { event in
+                guard let eventLogin = event.requestedReviewer?.login else { return false }
+                return eventLogin.lowercased() == username.lowercased()
+            }
+
+            let mostRecentEvent = reviewRequestedEvents.first
+
+            // Determine requester for categorization (same logic as getReviewRequests)
+            let requester: String? = {
+                if let matchingActor = mostRecentEvent?.actor?.login {
+                    return matchingActor
+                }
+                if let mostRecentActor = sortedEvents.first?.actor?.login {
+                    return mostRecentActor
+                }
+                return node.author?.login
+            }()
+
+            let reviewCategory = BotCategorizer.categorizeReviewer(requester)
+
+            newReviewRequests.append(NewReviewRequest(
+                prId: prId,
+                prNumber: node.number,
+                prTitle: node.title,
+                reviewCategory: reviewCategory
+            ))
+        }
+
+        return newReviewRequests
+    }
+}
+
+// MARK: - Review Detection Types
+
+struct NewReview {
+    let reviewId: String
+    let prNumber: Int
+    let prTitle: String
+    let reviewState: String
+}
+
+struct NewReviewRequest {
+    let prId: Int
+    let prNumber: Int
+    let prTitle: String
+    let reviewCategory: String
 }
 
 // MARK: - GraphQL Response Types
@@ -649,7 +946,14 @@ struct Reviews: Decodable {
 }
 
 struct ReviewNode: Decodable {
+    let id: String
     let state: String
+    let author: ReviewAuthor?
+    let createdAt: String
+}
+
+struct ReviewAuthor: Decodable {
+    let login: String
 }
 
 struct TimelineItems: Decodable {
