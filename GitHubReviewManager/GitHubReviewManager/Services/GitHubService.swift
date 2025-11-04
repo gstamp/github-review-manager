@@ -74,7 +74,7 @@ class GitHubService {
         }
 
         guard token != nil else {
-            return getMockPRSummaries()
+            throw GitHubError.notAuthenticated
         }
 
         do {
@@ -233,7 +233,7 @@ class GitHubService {
         }
 
         guard token != nil else {
-            return getMockReviewRequests()
+            throw GitHubError.notAuthenticated
         }
 
         do {
@@ -480,97 +480,6 @@ class GitHubService {
         }
     }
 
-    // MARK: - Mock Data
-
-    private func getMockPRSummaries() -> [PRSummary] {
-        let now = Date()
-        let threeDaysAgo = now.addingTimeInterval(-3 * 24 * 60 * 60)
-        let fiveDaysAgo = now.addingTimeInterval(-5 * 24 * 60 * 60)
-
-        let formatter = ISO8601DateFormatter()
-
-        return [
-            PRSummary(
-                id: 1,
-                number: 123,
-                title: "Add new feature for PR reviews",
-                url: "https://github.com/owner/repo/pull/123",
-                state: .open,
-                reviewStatus: .pending,
-                author: "developer1",
-                repoOwner: "owner",
-                repoName: "repo",
-                createdAt: formatter.string(from: now),
-                updatedAt: formatter.string(from: now),
-                readyAt: formatter.string(from: threeDaysAgo),
-                daysSinceReady: 3.0,
-                statusState: .success
-            ),
-            PRSummary(
-                id: 2,
-                number: 124,
-                title: "Fix bug in token handling",
-                url: "https://github.com/owner/repo/pull/124",
-                state: .open,
-                reviewStatus: .changesRequested,
-                author: "developer2",
-                repoOwner: "owner",
-                repoName: "repo",
-                createdAt: formatter.string(from: now),
-                updatedAt: formatter.string(from: now),
-                readyAt: formatter.string(from: fiveDaysAgo),
-                daysSinceReady: 5.0,
-                statusState: .failure
-            )
-        ]
-    }
-
-    private func getMockReviewRequests() -> [ReviewRequest] {
-        let now = Date()
-        let twoDaysAgo = now.addingTimeInterval(-2 * 24 * 60 * 60)
-        let sevenDaysAgo = now.addingTimeInterval(-7 * 24 * 60 * 60)
-
-        let formatter = ISO8601DateFormatter()
-
-        return [
-            ReviewRequest(
-                id: 4,
-                number: 126,
-                title: "Refactor authentication module",
-                url: "https://github.com/owner/repo/pull/126",
-                state: .open,
-                reviewStatus: .pending,
-                author: "developer4",
-                repoOwner: "owner",
-                repoName: "repo",
-                createdAt: formatter.string(from: now),
-                updatedAt: formatter.string(from: now),
-                reviewRequestedAt: formatter.string(from: twoDaysAgo),
-                daysWaiting: 2.0,
-                requestedReviewer: "johnsmith",
-                reviewCategory: "human",
-                statusState: .success
-            ),
-            ReviewRequest(
-                id: 5,
-                number: 127,
-                title: "Update dependencies",
-                url: "https://github.com/owner/repo/pull/127",
-                state: .open,
-                reviewStatus: .pending,
-                author: "developer5",
-                repoOwner: "owner",
-                repoName: "repo",
-                createdAt: formatter.string(from: now),
-                updatedAt: formatter.string(from: now),
-                reviewRequestedAt: formatter.string(from: sevenDaysAgo),
-                daysWaiting: 7.0,
-                requestedReviewer: "renovate[bot]",
-                reviewCategory: "renovate",
-                statusState: .pending
-            )
-        ]
-    }
 
     func invalidateCache() {
         cachedUserPRs = nil

@@ -227,8 +227,6 @@ class PRViewModel: ObservableObject {
             if let token = await authService.getGitHubToken() {
                 print("Got token from auth service")
                 githubService.setToken(token)
-            } else {
-                print("No token available - will use mock data")
             }
         } else {
             print("Token already available")
