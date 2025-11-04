@@ -69,13 +69,18 @@ struct ContentView: View {
                                     .padding()
                             } else {
                                 ForEach(viewModel.userPRs) { pr in
-                                    PRRow(pr: pr) {
-                                        SlackFormatter.copyToClipboard(SlackFormatter.formatMessage(pr: pr))
-                                    } onDismiss: {
-                                        Task {
-                                            await viewModel.dismissPR(pr.id)
-                                        }
-                                    }
+                                    PRRow(
+                                        pr: pr,
+                                        onCopy: {
+                                            SlackFormatter.copyToClipboard(SlackFormatter.formatMessage(pr: pr))
+                                        },
+                                        onDismiss: {
+                                            Task {
+                                                await viewModel.dismissPR(pr.id)
+                                            }
+                                        },
+                                        onApprove: nil
+                                    )
                                     .padding(.horizontal)
                                 }
                             }
@@ -114,13 +119,22 @@ struct ContentView: View {
                                         .padding(.horizontal)
 
                                         ForEach(group.requests) { request in
-                                            PRRow(pr: request) {
-                                                SlackFormatter.copyToClipboard(SlackFormatter.formatMessage(pr: request))
-                                            } onDismiss: {
-                                                Task {
-                                                    await viewModel.dismissPR(request.id)
+                                            PRRow(
+                                                pr: request,
+                                                onCopy: {
+                                                    SlackFormatter.copyToClipboard(SlackFormatter.formatMessage(pr: request))
+                                                },
+                                                onDismiss: {
+                                                    Task {
+                                                        await viewModel.dismissPR(request.id)
+                                                    }
+                                                },
+                                                onApprove: {
+                                                    Task {
+                                                        await viewModel.approvePR(request)
+                                                    }
                                                 }
-                                            }
+                                            )
                                             .padding(.horizontal)
                                         }
                                     }
@@ -307,6 +321,17 @@ class PRViewModel: ObservableObject {
         // Invalidate cache and reload
         githubService.invalidateCache()
         await loadData(forceRefresh: true)
+    }
+
+    func approvePR(_ reviewRequest: ReviewRequest) async {
+        do {
+            try await githubService.approvePR(pullRequestId: reviewRequest.graphQLId)
+            // Refresh data after successful approval
+            await loadData(forceRefresh: true)
+        } catch {
+            // Silently handle errors - could show an error message in the future
+            print("Error approving PR: \(error)")
+        }
     }
 }
 

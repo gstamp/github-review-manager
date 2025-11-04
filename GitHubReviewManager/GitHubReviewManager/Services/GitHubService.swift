@@ -410,7 +410,8 @@ class GitHubService {
                     daysWaiting: daysWaiting,
                     requestedReviewer: requestedReviewer,
                     reviewCategory: BotCategorizer.categorizeReviewer(requester),
-                    statusState: statusState
+                    statusState: statusState,
+                    graphQLId: node.id
                 )
             }
 
@@ -756,6 +757,54 @@ class GitHubService {
         }
 
         return newReviewRequests
+    }
+
+    // MARK: - PR Approval
+
+    /// Approve a pull request via GraphQL mutation
+    func approvePR(pullRequestId: String) async throws {
+        guard token != nil else {
+            throw GitHubError.notAuthenticated
+        }
+
+        let mutation = """
+        mutation($pullRequestId: ID!) {
+          addPullRequestReview(input: {
+            pullRequestId: $pullRequestId
+            event: APPROVE
+          }) {
+            review {
+              id
+              state
+            }
+          }
+        }
+        """
+
+        let variables: [String: Any] = [
+            "pullRequestId": pullRequestId
+        ]
+
+        struct ApproveResponse: Decodable {
+            let addPullRequestReview: AddPullRequestReview
+        }
+
+        struct AddPullRequestReview: Decodable {
+            let review: ReviewResponse
+        }
+
+        struct ReviewResponse: Decodable {
+            let id: String
+            let state: String
+        }
+
+        _ = try await executeGraphQL(
+            query: mutation,
+            variables: variables
+        ) as GraphQLResponse<ApproveResponse>
+
+        // Invalidate cache after approval
+        invalidateCache()
     }
 }
 

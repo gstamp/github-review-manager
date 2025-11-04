@@ -5,6 +5,7 @@ struct PRRow<PR: PRRowItem>: View {
     let pr: PR
     let onCopy: () -> Void
     let onDismiss: () -> Void
+    let onApprove: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -25,6 +26,22 @@ struct PRRow<PR: PRRowItem>: View {
                 Spacer()
 
                 HStack(spacing: 4) {
+                    // Show approve button for ReviewRequests that haven't been approved and don't have failing builds
+                    if let reviewRequest = pr as? ReviewRequest,
+                       reviewRequest.reviewStatus != .approved,
+                       reviewRequest.statusState != .failure,
+                       let approveAction = onApprove {
+                        Button(action: approveAction) {
+                            ApproveIcon()
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .padding(4)
+                        .background(Color.clear)
+                        .cornerRadius(4)
+                        .hoverCursor(.pointingHand)
+                        .help("Approve PR")
+                    }
+
                     CopyButton(action: onCopy)
                     Button(action: onDismiss) {
                         Text("×")

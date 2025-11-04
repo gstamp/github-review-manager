@@ -17,5 +17,6 @@ struct ReviewRequest: Codable, Identifiable {
     let requestedReviewer: String?
     let reviewCategory: String // 'human' or bot name (e.g., 'snyk', 'renovate', 'buildagencygitapitoken')
     let statusState: StatusState?
+    let graphQLId: String // GitHub GraphQL node ID for mutations
 }
 
