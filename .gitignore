@@ -1,9 +1,16 @@
-# Dependencies
-node_modules/
-
 # Build outputs
 dist/
 build/
+.build/
+*.xcodeproj/
+*.xcworkspace/
+DerivedData/
+
+# Swift build artifacts
+.build/
+*.dSYM/
+*.swiftmodule
+*.swiftdoc
 
 # Environment variables
 .env
@@ -22,19 +29,11 @@ Thumbs.db
 
 # Logs
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
 
-# Package manager lock files (keep pnpm-lock.yaml)
-package-lock.json
-yarn.lock
-
-# Electron
-out/
+# Package files
 *.dmg
 *.pkg
 
+# Cursor
 .cursor
 

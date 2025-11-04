@@ -1,104 +1,136 @@
 # GitHub Review Manager
 
-An Electron application for managing GitHub PR reviews with macOS tray integration.
+A native macOS application for managing GitHub PR reviews with menu bar integration. Built with Swift and SwiftUI.
 
 ## Features
 
-- macOS menu bar (tray) integration
+- macOS menu bar integration
 - View your open PRs across all repositories
 - Track review requests assigned to you
 - Display days since PRs were marked ready for review
 - Display days waiting for review requests
 - Dismiss PRs to hide them from the list
 - Automatic GitHub authentication via `gh` CLI or environment variable
-- Clean, modern UI for viewing review statuses
+- Clean, modern native UI
 
 ## Prerequisites
 
-- Node.js 18+ and pnpm
-- macOS (for tray functionality)
-- GitHub Personal Access Token (optional, for real API access)
+- macOS 12.0 or later
+- Swift toolchain (included with macOS, or install from [swift.org](https://swift.org/downloads))
+- Command Line Tools (if not using full Xcode):
+  ```bash
+  xcode-select --install
+  ```
 
-## Setup
+## Quick Start
 
-1. Install dependencies:
+The easiest way to build and run:
+
 ```bash
-pnpm install
+make run
 ```
 
-2. Set up environment variables (optional):
-```bash
-# Create a .env file
-echo "GITHUB_TOKEN=your_github_token_here" > .env
-```
+This will build the app, remove quarantine attributes, and launch it automatically.
 
-If no token is provided, the app will use mock data for development.
-
-## Development
-
-Run the development server:
-```bash
-pnpm run dev
-```
-
-This will:
-- Start the Vite dev server for the renderer process
-- Launch Electron with hot reload
-
-## Building
+## Build
 
 Build the application:
+
 ```bash
-pnpm run build
+make build
 ```
 
-This compiles TypeScript and builds the renderer bundle.
+Or use the build script directly:
 
-## Packaging
-
-Package the application for macOS:
 ```bash
-pnpm run package:mac
+cd GitHubReviewManager && ./build.sh
 ```
 
-This creates a DMG installer in the `dist` directory.
+The build process:
+- Compiles all Swift files using `swiftc`
+- Creates the `.app` bundle structure
+- Copies Info.plist and resources
+- Code signs with ad-hoc signature
+- Outputs to `GitHubReviewManager/.build/GitHubReviewManager.app`
 
-## Project Structure
+## Run
 
-```
-src/
-├── main/           # Electron main process
-│   ├── github/     # GitHub API client
-│   ├── ipc.ts      # IPC handlers
-│   ├── main.ts     # Main entry point
-│   └── tray.ts     # Tray menu implementation
-├── preload/        # Preload scripts (IPC bridge)
-├── renderer/       # React renderer process
-│   ├── App.tsx     # Main React component
-│   └── main.tsx    # Renderer entry point
-└── common/         # Shared types and utilities
-    └── ipcChannels.ts
+Run the app (builds first if needed):
+
+```bash
+make run
 ```
 
-## Configuration
+Or open the already-built app:
+
+```bash
+make open
+```
+
+## Install
+
+Install to `/Applications`:
+
+```bash
+make install
+```
+
+The app will be available in Applications and Spotlight.
+
+## Package for Distribution
+
+### Code Signing
+
+For development, ad-hoc signing is done automatically. For distribution, sign with your Developer ID:
+
+```bash
+make sign-dist SIGNING_IDENTITY="Developer ID Application: Your Name (TEAM_ID)"
+```
+
+### Create DMG
+
+Create a distributable DMG:
+
+```bash
+make dmg
+```
+
+This creates `GitHubReviewManager.dmg` in the project root. Alternatively, you can distribute the `.app` bundle directly.
+
+## Other Commands
+
+- `make clean` - Remove build artifacts
+- `make check` - Check if build exists
+- `make help` - Show all available commands
+
+## First Launch
+
+On first launch, macOS may show a security warning. If you see "GitHubReviewManager.app cannot be opened because the developer cannot be verified":
+1. Right-click the app
+2. Select "Open"
+3. Confirm in the dialog that you want to open it
+
+This is normal for apps that aren't notarized by Apple. For distribution, consider using Developer ID signing and notarization.
+
+## Setup
 
 ### GitHub Authentication
 
 The app supports two methods for GitHub authentication (in order of preference):
 
-1. **GitHub CLI (`gh`)** - If you have GitHub CLI installed and authenticated, the app will automatically use your `gh` token:
+1. **GitHub CLI (`gh`)** - If you have GitHub CLI installed and authenticated:
    ```bash
    gh auth login
    ```
 
-2. **Environment Variable** - Set a GitHub Personal Access Token as an environment variable:
+2. **Environment Variable** - Set a GitHub Personal Access Token:
    ```bash
    export GITHUB_TOKEN=your_token_here
    ```
 
    Or add it to a `.env` file (make sure it's in `.gitignore`).
 
-If neither method is available, the app will use mock data for development.
+If neither method is available, the app will not be able to fetch PR data.
 
 #### GitHub Token Scopes
 
@@ -108,18 +140,29 @@ If using a Personal Access Token, it needs the following scopes:
 
 ### Dismissing PRs
 
-You can dismiss PRs from the list by clicking the × button. Dismissed PRs are stored locally and will remain hidden until they are closed or you restart the app (dismissed state is persisted across sessions).
+You can dismiss PRs from the list by clicking the dismiss button. Dismissed PRs are stored locally using UserDefaults and will remain hidden until they are closed or you clear the dismissed list. The dismissed state persists across app launches.
 
-## Scripts
+## Project Structure
 
-- `pnpm run dev` - Start development server
-- `pnpm run build` - Build the application
-- `pnpm run lint` - Run ESLint
-- `pnpm run typecheck` - Run TypeScript type checking
-- `pnpm run package` - Package the application
-- `pnpm run package:mac` - Package for macOS
+```
+GitHubReviewManager/
+├── GitHubReviewManager/        # Swift source code
+│   ├── Models/                 # Data models (PRSummary, ReviewRequest, etc.)
+│   ├── Services/               # Business logic (GitHubService, AuthService, etc.)
+│   ├── Views/                  # SwiftUI views
+│   │   └── Components/         # Reusable UI components
+│   ├── Utilities/              # Helper utilities
+│   ├── App.swift               # App entry point
+│   └── AppDelegate.swift       # App delegate
+├── build.sh                    # Build script
+├── Package.swift               # Swift Package Manager manifest
+└── README.md                   # Detailed project documentation
+```
+
+## Development
+
+See `GitHubReviewManager/README.md` for detailed development documentation and `GitHubReviewManager/BUILD_WITHOUT_XCODE.md` for advanced build options.
 
 ## License
 
 MIT
-

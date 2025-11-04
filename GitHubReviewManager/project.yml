@@ -1,0 +1,40 @@
+name: GitHubReviewManager
+options:
+  bundleIdPrefix: com.github-review-manager
+  deploymentTarget:
+    macOS: "12.0"
+  developmentLanguage: en
+  xcodeVersion: "14.0"
+
+targets:
+  GitHubReviewManager:
+    type: application
+    platform: macOS
+    sources:
+      - path: GitHubReviewManager
+        excludes:
+          - "**/*.md"
+    resources:
+      - path: GitHubReviewManager/Resources
+      - path: assets/icon.png
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.github-review-manager.app
+      PRODUCT_NAME: GitHub Review Manager
+      INFOPLIST_FILE: GitHubReviewManager/Resources/Info.plist
+      CODE_SIGN_IDENTITY: Apple Development
+      SWIFT_VERSION: "5.0"
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
+    info:
+      path: GitHubReviewManager/Resources/Info.plist
+      properties:
+        CFBundleName: GitHub Review Manager
+        CFBundleDisplayName: GitHub Review Manager
+        CFBundleExecutable: GitHubReviewManager
+        CFBundleIdentifier: com.github-review-manager.app
+        CFBundlePackageType: APPL
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        LSApplicationCategoryType: public.app-category.productivity
+        LSUIElement: true
+        NSPrincipalClass: NSApplication
+

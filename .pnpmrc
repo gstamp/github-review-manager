@@ -1,4 +1,0 @@
-save-exact=true
-enable-pre-post-scripts=true
-onlyBuiltDependencies=electron
-

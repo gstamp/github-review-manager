@@ -1,0 +1,21 @@
+import Foundation
+
+struct ReviewRequest: Codable, Identifiable {
+    let id: Int
+    let number: Int
+    let title: String
+    let url: String
+    let state: PRState
+    let reviewStatus: ReviewStatus
+    let author: String
+    let repoOwner: String
+    let repoName: String
+    let createdAt: String
+    let updatedAt: String
+    let reviewRequestedAt: String?
+    let daysWaiting: Double?
+    let requestedReviewer: String?
+    let reviewCategory: String // 'human' or bot name (e.g., 'snyk', 'renovate', 'buildagencygitapitoken')
+    let statusState: StatusState?
+}
+
