@@ -79,7 +79,12 @@ struct ContentView: View {
                                                 await viewModel.dismissPR(pr.id)
                                             }
                                         },
-                                        onApprove: nil
+                                        onApprove: nil,
+                                        onMerge: {
+                                            Task {
+                                                await viewModel.mergePR(pr)
+                                            }
+                                        }
                                     )
                                     .padding(.horizontal)
                                 }
@@ -132,6 +137,11 @@ struct ContentView: View {
                                                 onApprove: {
                                                     Task {
                                                         await viewModel.approvePR(request)
+                                                    }
+                                                },
+                                                onMerge: {
+                                                    Task {
+                                                        await viewModel.mergePR(request)
                                                     }
                                                 }
                                             )
@@ -324,13 +334,101 @@ class PRViewModel: ObservableObject {
     }
 
     func approvePR(_ reviewRequest: ReviewRequest) async {
+        // Optimistically update local state
+        updateReviewRequestStatus(reviewRequest.id, newStatus: .approved)
+
         do {
+            print("Attempting to approve PR #\(reviewRequest.number) (\(reviewRequest.repoOwner)/\(reviewRequest.repoName))")
+            print("Using GraphQL ID: \(reviewRequest.graphQLId)")
             try await githubService.approvePR(pullRequestId: reviewRequest.graphQLId)
-            // Refresh data after successful approval
-            await loadData(forceRefresh: true)
+            print("Successfully approved PR #\(reviewRequest.number)")
+            // Invalidate cache but don't reload - we've already updated locally
+            githubService.invalidateCache()
         } catch {
-            // Silently handle errors - could show an error message in the future
-            print("Error approving PR: \(error)")
+            // Revert optimistic update on error
+            updateReviewRequestStatus(reviewRequest.id, newStatus: reviewRequest.reviewStatus)
+            // Log error details for debugging
+            print("Error approving PR #\(reviewRequest.number) (\(reviewRequest.repoOwner)/\(reviewRequest.repoName)): \(error)")
+            if let githubError = error as? GitHubError {
+                print("GitHub error details: \(githubError.localizedDescription)")
+            }
+            // Refresh to get accurate state on error
+            await loadData(forceRefresh: true)
+        }
+    }
+
+    func mergePR(_ pr: PRSummary) async {
+        // Optimistically remove PR from list (merged PRs are closed)
+        let prId = pr.id
+        userPRs.removeAll { $0.id == prId }
+
+        do {
+            // Get repository merge method (cached, so minimal API calls)
+            let mergeMethod = try await githubService.getRepositoryMergeMethod(
+                owner: pr.repoOwner,
+                repo: pr.repoName
+            )
+            try await githubService.mergePR(pullRequestId: pr.graphQLId, mergeMethod: mergeMethod)
+            print("Successfully merged PR #\(pr.number)")
+            // Invalidate cache but don't reload - we've already updated locally
+            githubService.invalidateCache()
+        } catch {
+            // Revert optimistic update on error - reload to restore
+            await loadData(forceRefresh: true)
+            print("Error merging PR: \(error)")
+        }
+    }
+
+    func mergePR(_ reviewRequest: ReviewRequest) async {
+        // Optimistically remove PR from list (merged PRs are closed)
+        let prId = reviewRequest.id
+        reviewRequests.removeAll { $0.id == prId }
+
+        do {
+            // Get repository merge method (cached, so minimal API calls)
+            let mergeMethod = try await githubService.getRepositoryMergeMethod(
+                owner: reviewRequest.repoOwner,
+                repo: reviewRequest.repoName
+            )
+            try await githubService.mergePR(pullRequestId: reviewRequest.graphQLId, mergeMethod: mergeMethod)
+            print("Successfully merged PR #\(reviewRequest.number)")
+            // Invalidate cache but don't reload - we've already updated locally
+            githubService.invalidateCache()
+        } catch {
+            // Revert optimistic update on error - reload to restore
+            await loadData(forceRefresh: true)
+            print("Error merging PR: \(error)")
+        }
+    }
+
+    // MARK: - Local State Updates
+
+    /// Update review status for a review request locally (optimistic update)
+    private func updateReviewRequestStatus(_ prId: Int, newStatus: ReviewStatus) {
+        if let index = reviewRequests.firstIndex(where: { $0.id == prId }) {
+            let existingRequest = reviewRequests[index]
+            // Create updated ReviewRequest with new status
+            let updated = ReviewRequest(
+                id: existingRequest.id,
+                number: existingRequest.number,
+                title: existingRequest.title,
+                url: existingRequest.url,
+                state: existingRequest.state,
+                reviewStatus: newStatus,
+                author: existingRequest.author,
+                repoOwner: existingRequest.repoOwner,
+                repoName: existingRequest.repoName,
+                createdAt: existingRequest.createdAt,
+                updatedAt: existingRequest.updatedAt,
+                reviewRequestedAt: existingRequest.reviewRequestedAt,
+                daysWaiting: existingRequest.daysWaiting,
+                requestedReviewer: existingRequest.requestedReviewer,
+                reviewCategory: existingRequest.reviewCategory,
+                statusState: existingRequest.statusState,
+                graphQLId: existingRequest.graphQLId,
+                mergeable: existingRequest.mergeable
+            )
+            reviewRequests[index] = updated
         }
     }
 }

@@ -6,6 +6,7 @@ struct PRRow<PR: PRRowItem>: View {
     let onCopy: () -> Void
     let onDismiss: () -> Void
     let onApprove: (() -> Void)?
+    let onMerge: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -26,20 +27,19 @@ struct PRRow<PR: PRRowItem>: View {
                 Spacer()
 
                 HStack(spacing: 4) {
+                    // Show merge button for PRs that are approved and mergeable
+                    if pr.reviewStatus == .approved,
+                       pr.mergeable == true,
+                       let mergeAction = onMerge {
+                        MergeButton(action: mergeAction)
+                    }
+
                     // Show approve button for ReviewRequests that haven't been approved and don't have failing builds
                     if let reviewRequest = pr as? ReviewRequest,
                        reviewRequest.reviewStatus != .approved,
                        reviewRequest.statusState != .failure,
                        let approveAction = onApprove {
-                        Button(action: approveAction) {
-                            ApproveIcon()
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .padding(4)
-                        .background(Color.clear)
-                        .cornerRadius(4)
-                        .hoverCursor(.pointingHand)
-                        .help("Approve PR")
+                        ApproveButton(action: approveAction)
                     }
 
                     CopyButton(action: onCopy)
@@ -102,6 +102,7 @@ protocol PRRowItem {
     var state: PRState { get }
     var reviewStatus: ReviewStatus { get }
     var statusState: StatusState? { get }
+    var mergeable: Bool? { get }
 }
 
 extension PRSummary: PRRowItem {}

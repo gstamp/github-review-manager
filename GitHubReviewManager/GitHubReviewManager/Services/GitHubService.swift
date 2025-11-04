@@ -12,6 +12,7 @@ class GitHubService {
 
     private var cachedUserPRs: (data: [PRSummary], timestamp: Date)?
     private var cachedReviewRequests: (data: [ReviewRequest], timestamp: Date)?
+    private var cachedMergeMethods: [String: String] = [:] // Cache merge method per "owner/repo"
 
     private init() {}
 
@@ -128,6 +129,7 @@ class GitHubService {
                         }
                       }
                     }
+                    mergeable
                   }
                 }
               }
@@ -199,7 +201,9 @@ class GitHubService {
                         updatedAt: node.updatedAt,
                         readyAt: readyAt,
                         daysSinceReady: daysSinceReady,
-                        statusState: statusState
+                        statusState: statusState,
+                        mergeable: node.mergeable == .mergeable,
+                        graphQLId: node.id
                     )
                 }
 
@@ -302,6 +306,7 @@ class GitHubService {
                         }
                       }
                     }
+                    mergeable
                   }
                 }
               }
@@ -411,7 +416,8 @@ class GitHubService {
                     requestedReviewer: requestedReviewer,
                     reviewCategory: BotCategorizer.categorizeReviewer(requester),
                     statusState: statusState,
-                    graphQLId: node.id
+                    graphQLId: node.id,
+                    mergeable: node.mergeable == .mergeable
                 )
             }
 
@@ -475,7 +481,7 @@ class GitHubService {
             // Log decoding error for debugging
             if let jsonString = String(data: data, encoding: .utf8) {
                 print("Decoding error: \(decodeError)")
-                print("Response preview: \(String(jsonString.prefix(500)))")
+                print("Full response: \(jsonString)")
             }
             throw decodeError
         }
@@ -772,8 +778,9 @@ class GitHubService {
           addPullRequestReview(input: {
             pullRequestId: $pullRequestId
             event: APPROVE
+            body: ""
           }) {
-            review {
+            pullRequestReview {
               id
               state
             }
@@ -790,7 +797,7 @@ class GitHubService {
         }
 
         struct AddPullRequestReview: Decodable {
-            let review: ReviewResponse
+            let pullRequestReview: ReviewResponse
         }
 
         struct ReviewResponse: Decodable {
@@ -798,12 +805,134 @@ class GitHubService {
             let state: String
         }
 
+        let response: GraphQLResponse<ApproveResponse> = try await executeGraphQL(
+            query: mutation,
+            variables: variables
+        )
+
+        // Check for GraphQL errors in response
+        if let errors = response.errors, !errors.isEmpty {
+            let errorMessages = errors.map { $0.message }.joined(separator: "; ")
+            print("GraphQL errors in approve response: \(errorMessages)")
+            throw GitHubError.graphQLError(errorMessages)
+        }
+
+        print("Approval successful. Review ID: \(response.data.addPullRequestReview.pullRequestReview.id), State: \(response.data.addPullRequestReview.pullRequestReview.state)")
+
+        // Invalidate cache after approval
+        invalidateCache()
+    }
+
+    // MARK: - Repository Merge Method
+
+    /// Get the repository's default merge method (MERGE, SQUASH, or REBASE)
+    /// Caches the result per repository to minimize API calls
+    func getRepositoryMergeMethod(owner: String, repo: String) async throws -> String {
+        let cacheKey = "\(owner)/\(repo)"
+
+        // Return cached value if available
+        if let cached = cachedMergeMethods[cacheKey] {
+            return cached
+        }
+
+        guard token != nil else {
+            throw GitHubError.notAuthenticated
+        }
+
+        let query = """
+        query($owner: String!, $repo: String!) {
+          repository(owner: $owner, name: $repo) {
+            mergeCommitAllowed
+            squashMergeAllowed
+            rebaseMergeAllowed
+          }
+        }
+        """
+
+        let variables: [String: Any] = [
+            "owner": owner,
+            "repo": repo
+        ]
+
+        struct RepositoryMergeMethodResponse: Decodable {
+            let repository: RepositoryMergeSettings
+        }
+
+        struct RepositoryMergeSettings: Decodable {
+            let mergeCommitAllowed: Bool
+            let squashMergeAllowed: Bool
+            let rebaseMergeAllowed: Bool
+        }
+
+        let response: GraphQLResponse<RepositoryMergeMethodResponse> = try await executeGraphQL(
+            query: query,
+            variables: variables
+        )
+
+        // Determine merge method: MERGE > SQUASH > REBASE
+        let mergeMethod: String
+        if response.data.repository.mergeCommitAllowed {
+            mergeMethod = "MERGE"
+        } else if response.data.repository.squashMergeAllowed {
+            mergeMethod = "SQUASH"
+        } else if response.data.repository.rebaseMergeAllowed {
+            mergeMethod = "REBASE"
+        } else {
+            // Fallback to MERGE if none are allowed (shouldn't happen)
+            mergeMethod = "MERGE"
+        }
+
+        // Cache the result
+        cachedMergeMethods[cacheKey] = mergeMethod
+        return mergeMethod
+    }
+
+    // MARK: - PR Merge
+
+    /// Merge a pull request using the specified merge method
+    func mergePR(pullRequestId: String, mergeMethod: String) async throws {
+        guard token != nil else {
+            throw GitHubError.notAuthenticated
+        }
+
+        let mutation = """
+        mutation($pullRequestId: ID!, $mergeMethod: PullRequestMergeMethod!) {
+          mergePullRequest(input: {
+            pullRequestId: $pullRequestId
+            mergeMethod: $mergeMethod
+          }) {
+            pullRequest {
+              id
+              merged
+            }
+          }
+        }
+        """
+
+        let variables: [String: Any] = [
+            "pullRequestId": pullRequestId,
+            "mergeMethod": mergeMethod
+        ]
+
+        struct MergeResponse: Decodable {
+            let mergePullRequest: MergePullRequest
+        }
+
+        struct MergePullRequest: Decodable {
+            let pullRequest: MergedPR
+        }
+
+        struct MergedPR: Decodable {
+            let id: String
+            let merged: Bool
+        }
+
         _ = try await executeGraphQL(
             query: mutation,
             variables: variables
-        ) as GraphQLResponse<ApproveResponse>
+        ) as GraphQLResponse<MergeResponse>
 
-        // Invalidate cache after approval
+        // Invalidate cache after merge
         invalidateCache()
     }
 }
@@ -869,6 +998,13 @@ struct UserOpenPRNode: Decodable {
     let reviews: Reviews
     let timelineItems: TimelineItems
     let commits: Commits
+    let mergeable: MergeableState?
+}
+
+enum MergeableState: String, Decodable {
+    case mergeable = "MERGEABLE"
+    case conflicting = "CONFLICTING"
+    case unknown = "UNKNOWN"
 }
 
 struct ReviewRequestNode: Decodable {
@@ -884,6 +1020,7 @@ struct ReviewRequestNode: Decodable {
     let reviews: Reviews
     let timelineItems: ReviewRequestTimelineItems
     let commits: Commits
+    let mergeable: MergeableState?
 }
 
 struct Author: Decodable {

@@ -18,5 +18,6 @@ struct ReviewRequest: Codable, Identifiable {
     let reviewCategory: String // 'human' or bot name (e.g., 'snyk', 'renovate', 'buildagencygitapitoken')
     let statusState: StatusState?
     let graphQLId: String // GitHub GraphQL node ID for mutations
+    let mergeable: Bool? // Whether PR can be merged
 }
 
