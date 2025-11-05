@@ -15,12 +15,18 @@ struct ContentView: View {
                 Spacer()
 
                 HStack(spacing: 8) {
+                    if viewModel.isRefreshing {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .frame(width: 16, height: 16)
+                    }
+
                     Button("Refresh") {
                         Task {
                             await viewModel.loadData(forceRefresh: true)
                         }
                     }
-                    .disabled(viewModel.loading)
+                    .disabled(viewModel.loading || viewModel.isRefreshing)
                     .hoverCursor(.pointingHand)
 
                     Button("Quit") {
@@ -37,15 +43,16 @@ struct ContentView: View {
             // Content
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    if viewModel.loading {
+                    if viewModel.loading && viewModel.userPRs.isEmpty && viewModel.reviewRequests.isEmpty {
                         ProgressView()
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding()
-                    } else if let error = viewModel.error {
-                        Text("Error: \(error)")
-                            .foregroundColor(.red)
-                            .padding()
                     } else {
+                        if let error = viewModel.error {
+                            Text("Error: \(error)")
+                                .foregroundColor(.red)
+                                .padding()
+                        }
                         // My Open PRs Section
                         VStack(alignment: .leading, spacing: 12) {
                             HStack {
@@ -172,6 +179,7 @@ class PRViewModel: ObservableObject {
     @Published var userPRs: [PRSummary] = []
     @Published var reviewRequests: [ReviewRequest] = []
     @Published var loading = false
+    @Published var isRefreshing = false
     @Published var error: String?
 
     private let githubService = GitHubService.shared
@@ -242,7 +250,13 @@ class PRViewModel: ObservableObject {
     }
 
     func loadData(forceRefresh: Bool = false) async {
-        loading = true
+        let hasExistingData = !userPRs.isEmpty || !reviewRequests.isEmpty
+
+        if hasExistingData {
+            isRefreshing = true
+        } else {
+            loading = true
+        }
         error = nil
 
         // Initialize auth if needed
@@ -305,6 +319,7 @@ class PRViewModel: ObservableObject {
         }
 
         loading = false
+        isRefreshing = false
 
         // Start or restart automatic refresh timer
         startRefreshTimer()
