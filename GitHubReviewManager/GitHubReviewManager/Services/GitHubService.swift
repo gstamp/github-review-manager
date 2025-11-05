@@ -400,23 +400,6 @@ class GitHubService {
                 // Fall back to most recent event if no exact match found, then user's review date, then PR creation date
                 let reviewRequestedAt = mostRecentEvent?.createdAt ?? sortedEvents.first?.createdAt ?? userReviewDate ?? node.createdAt
 
-                // Use actor (who requested the review) for categorization
-                // If no matching event, use the most recent event's actor (even if it doesn't match username)
-                // This handles cases where the event structure doesn't match perfectly
-                // Fall back to PR author if no actor is available
-                let requester: String? = {
-                    if let matchingActor = mostRecentEvent?.actor?.login {
-                        return matchingActor
-                    }
-                    // If no matching event, try the most recent event's actor
-                    if let mostRecentActor = sortedEvents.first?.actor?.login {
-                        return mostRecentActor
-                    }
-                    // Finally fall back to PR author
-                    return node.author?.login
-                }()
-
-
                 let daysWaiting: Double? = {
                     let formatter = ISO8601DateFormatter()
                     guard let date = formatter.date(from: reviewRequestedAt) else {
@@ -452,7 +435,7 @@ class GitHubService {
                     reviewRequestedAt: reviewRequestedAt,
                     daysWaiting: daysWaiting,
                     requestedReviewer: requestedReviewer,
-                    reviewCategory: BotCategorizer.categorizeReviewer(requester),
+                    reviewCategory: BotCategorizer.categorizeReviewer(node.author?.login),
                     statusState: statusState,
                     graphQLId: node.id,
                     mergeable: node.mergeable == .mergeable
@@ -764,33 +747,8 @@ class GitHubService {
                 continue
             }
 
-            // Sort timeline events to find requester for categorization
-            let sortedEvents = node.timelineItems.nodes.sorted { event1, event2 in
-                let date1 = ISO8601DateFormatter().date(from: event1.createdAt) ?? Date.distantPast
-                let date2 = ISO8601DateFormatter().date(from: event2.createdAt) ?? Date.distantPast
-                return date1 > date2
-            }
-
-            // Find the most recent review_requested event for this user
-            let reviewRequestedEvents = sortedEvents.filter { event in
-                guard let eventLogin = event.requestedReviewer?.login else { return false }
-                return eventLogin.lowercased() == username.lowercased()
-            }
-
-            let mostRecentEvent = reviewRequestedEvents.first
-
-            // Determine requester for categorization (same logic as getReviewRequests)
-            let requester: String? = {
-                if let matchingActor = mostRecentEvent?.actor?.login {
-                    return matchingActor
-                }
-                if let mostRecentActor = sortedEvents.first?.actor?.login {
-                    return mostRecentActor
-                }
-                return node.author?.login
-            }()
-
-            let reviewCategory = BotCategorizer.categorizeReviewer(requester)
+            // Categorize by PR author (not reviewer) for grouping
+            let reviewCategory = BotCategorizer.categorizeReviewer(node.author?.login)
 
             newReviewRequests.append(NewReviewRequest(
                 prId: prId,

@@ -3,6 +3,12 @@ import AppKit
 
 struct ContentView: View {
     @StateObject private var viewModel = PRViewModel()
+    @State private var selectedTab: TabIdentifier = .myPRs
+
+    enum TabIdentifier: Hashable {
+        case myPRs
+        case category(String)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -41,124 +47,79 @@ struct ContentView: View {
             Divider()
 
             // Content
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    if viewModel.loading && viewModel.userPRs.isEmpty && viewModel.reviewRequests.isEmpty {
-                        ProgressView()
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .padding()
-                    } else {
-                        if let error = viewModel.error {
-                            Text("Error: \(error)")
-                                .foregroundColor(.red)
-                                .padding()
-                        }
-                        // My Open PRs Section
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack {
-                                Text("My Open PRs")
-                                    .font(.headline)
+            if viewModel.loading && viewModel.userPRs.isEmpty && viewModel.reviewRequests.isEmpty {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                if let error = viewModel.error {
+                    Text("Error: \(error)")
+                        .foregroundColor(.red)
+                        .padding()
+                }
 
-                                Spacer()
-
-                                if !viewModel.userPRs.isEmpty {
-                                    CopyAllButton {
-                                        let messages = viewModel.userPRs.map { SlackFormatter.formatMessage(pr: $0) }
-                                        SlackFormatter.copyToClipboard(messages.joined(separator: "\n"))
-                                    }
-                                }
+                TabView(selection: $selectedTab) {
+                    // My PRs Tab
+                    PRListView(
+                        prs: viewModel.userPRs,
+                        emptyMessage: "No open PRs found",
+                        onCopy: { pr in
+                            SlackFormatter.copyToClipboard(SlackFormatter.formatMessage(pr: pr))
+                        },
+                        onDismiss: { pr in
+                            Task {
+                                await viewModel.dismissPR(pr.id)
                             }
-                            .padding(.horizontal)
-
-                            if viewModel.userPRs.isEmpty {
-                                Text("No open PRs found")
-                                    .foregroundColor(.secondary)
-                                    .padding()
-                            } else {
-                                ForEach(viewModel.userPRs) { pr in
-                                    PRRow(
-                                        pr: pr,
-                                        onCopy: {
-                                            SlackFormatter.copyToClipboard(SlackFormatter.formatMessage(pr: pr))
-                                        },
-                                        onDismiss: {
-                                            Task {
-                                                await viewModel.dismissPR(pr.id)
-                                            }
-                                        },
-                                        onApprove: nil,
-                                        onMerge: {
-                                            Task {
-                                                await viewModel.mergePR(pr)
-                                            }
-                                        }
-                                    )
-                                    .padding(.horizontal)
-                                }
+                        },
+                        onApprove: nil,
+                        onMerge: { pr in
+                            Task {
+                                await viewModel.mergePR(pr)
                             }
+                        },
+                        showCopyAll: !viewModel.userPRs.isEmpty,
+                        onCopyAll: {
+                            let messages = viewModel.userPRs.map { SlackFormatter.formatMessage(pr: $0) }
+                            SlackFormatter.copyToClipboard(messages.joined(separator: "\n"))
                         }
-                        .padding(.vertical)
+                    )
+                    .tabItem {
+                        Text("My PRs (\(viewModel.myPRsCount))")
+                    }
+                    .tag(TabIdentifier.myPRs)
 
-                        Divider()
-
-                        // Review Requests Section
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Review Requests")
-                                .font(.headline)
-                                .padding(.horizontal)
-
-                            if viewModel.reviewRequests.isEmpty {
-                                Text("No review requests found")
-                                    .foregroundColor(.secondary)
-                                    .padding()
-                            } else {
-                                ForEach(viewModel.categoryGroups, id: \.category) { group in
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        HStack {
-                                            Text(group.categoryLabel)
-                                                .font(.subheadline)
-                                                .fontWeight(.semibold)
-
-                                            Spacer()
-
-                                            if !group.requests.isEmpty {
-                                                CopyAllButton {
-                                                    let messages = group.requests.map { SlackFormatter.formatMessage(pr: $0) }
-                                                    SlackFormatter.copyToClipboard(messages.joined(separator: "\n"))
-                                                }
-                                            }
-                                        }
-                                        .padding(.horizontal)
-
-                                        ForEach(group.requests) { request in
-                                            PRRow(
-                                                pr: request,
-                                                onCopy: {
-                                                    SlackFormatter.copyToClipboard(SlackFormatter.formatMessage(pr: request))
-                                                },
-                                                onDismiss: {
-                                                    Task {
-                                                        await viewModel.dismissPR(request.id)
-                                                    }
-                                                },
-                                                onApprove: {
-                                                    Task {
-                                                        await viewModel.approvePR(request)
-                                                    }
-                                                },
-                                                onMerge: {
-                                                    Task {
-                                                        await viewModel.mergePR(request)
-                                                    }
-                                                }
-                                            )
-                                            .padding(.horizontal)
-                                        }
-                                    }
+                    // Category Tabs
+                    ForEach(viewModel.sortedCategoryGroups, id: \.category) { group in
+                        PRListView(
+                            prs: group.requests,
+                            emptyMessage: "No review requests found",
+                            onCopy: { request in
+                                SlackFormatter.copyToClipboard(SlackFormatter.formatMessage(pr: request))
+                            },
+                            onDismiss: { request in
+                                Task {
+                                    await viewModel.dismissPR(request.id)
                                 }
+                            },
+                            onApprove: { request in
+                                Task {
+                                    await viewModel.approvePR(request)
+                                }
+                            },
+                            onMerge: { request in
+                                Task {
+                                    await viewModel.mergePR(request)
+                                }
+                            },
+                            showCopyAll: !group.requests.isEmpty,
+                            onCopyAll: {
+                                let messages = group.requests.map { SlackFormatter.formatMessage(pr: $0) }
+                                SlackFormatter.copyToClipboard(messages.joined(separator: "\n"))
                             }
+                        )
+                        .tabItem {
+                            Text("\(group.categoryLabel) (\(group.requests.count))")
                         }
-                        .padding(.vertical)
+                        .tag(TabIdentifier.category(group.category))
                     }
                 }
             }
@@ -189,6 +150,10 @@ class PRViewModel: ObservableObject {
     private var refreshTimer: Timer?
     private let refreshInterval: TimeInterval = 5 * 60 // 5 minutes, matching cacheTTL
 
+    var myPRsCount: Int {
+        userPRs.count
+    }
+
     var categoryGroups: [CategoryGroup] {
         // Group reviews by category
         var categories: [String: [ReviewRequest]] = [:]
@@ -200,36 +165,7 @@ class PRViewModel: ObservableObject {
             categories[category]?.append(request)
         }
 
-        // Sort categories: human first, then specific bot order, then alphabetically
-        let botOrder = ["snyk-io", "renovate", "buildagencygitapitoken"]
-        let sortedCategories = categories.sorted { category1, category2 in
-            let a = category1.key
-            let b = category2.key
-
-            // Human always first
-            if a == "human" { return true }
-            if b == "human" { return false }
-
-            // Check if categories are in the specific bot order
-            let aIndex = botOrder.firstIndex(of: a) ?? Int.max
-            let bIndex = botOrder.firstIndex(of: b) ?? Int.max
-
-            // Both in ordered list - sort by their position
-            if aIndex != Int.max && bIndex != Int.max {
-                return aIndex < bIndex
-            }
-
-            // Only a is in ordered list - it comes first
-            if aIndex != Int.max { return true }
-
-            // Only b is in ordered list - it comes first
-            if bIndex != Int.max { return false }
-
-            // Neither in ordered list - sort alphabetically
-            return a < b
-        }
-
-        return sortedCategories.map { category, requests in
+        return categories.map { category, requests in
             let categoryLabel: String = {
                 switch category {
                 case "human":
@@ -246,6 +182,21 @@ class PRViewModel: ObservableObject {
             }()
 
             return CategoryGroup(category: category, categoryLabel: categoryLabel, requests: requests)
+        }
+    }
+
+    var sortedCategoryGroups: [CategoryGroup] {
+        // Sort categories: human first, then alphabetically
+        categoryGroups.sorted { group1, group2 in
+            let a = group1.category
+            let b = group2.category
+
+            // Human always first
+            if a == "human" { return true }
+            if b == "human" { return false }
+
+            // Sort alphabetically
+            return a < b
         }
     }
 
