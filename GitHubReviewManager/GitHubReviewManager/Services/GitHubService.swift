@@ -313,18 +313,42 @@ class GitHubService {
             }
             """
 
-            let variables: [String: Any] = [
+            // Fetch PRs currently requested for review
+            let requestedVariables: [String: Any] = [
                 "searchQuery": "is:open is:pr review-requested:\(username) archived:false",
                 "first": 100
             ]
 
-            let response: GraphQLResponse<SearchQuery<ReviewRequestNode>> = try await executeGraphQL(
+            let requestedResponse: GraphQLResponse<SearchQuery<ReviewRequestNode>> = try await executeGraphQL(
                 query: query,
-                variables: variables
+                variables: requestedVariables
             )
 
-            // Process all nodes - don't filter, the search query already ensures user is requested
-            let reviewRequests = response.data.search.nodes.map { node in
+            // Fetch PRs reviewed by user (but not authored by them) to include approved PRs waiting to merge
+            let reviewedVariables: [String: Any] = [
+                "searchQuery": "is:open is:pr reviewed-by:\(username) -author:\(username) archived:false",
+                "first": 100
+            ]
+
+            let reviewedResponse: GraphQLResponse<SearchQuery<ReviewRequestNode>> = try await executeGraphQL(
+                query: query,
+                variables: reviewedVariables
+            )
+
+            // Combine both sets and deduplicate by PR ID
+            var prMap: [String: ReviewRequestNode] = [:]
+            for node in requestedResponse.data.search.nodes {
+                prMap[node.id] = node
+            }
+            for node in reviewedResponse.data.search.nodes {
+                // Only add if not already present (prefer requested over reviewed)
+                if prMap[node.id] == nil {
+                    prMap[node.id] = node
+                }
+            }
+
+            // Process all nodes
+            let reviewRequests = prMap.values.map { node in
                 // Determine review status
                 var reviewStatus: ReviewStatus = .pending
                 if let latestReview = node.reviews.nodes.last {
@@ -358,9 +382,23 @@ class GitHubService {
                 // If no matching events found but PR was returned by search, assume user is requested
                 // Use username as fallback since search query ensures user is requested
                 let requestedReviewer = mostRecentEvent?.requestedReviewer?.login ?? username
-                // Fall back to most recent event if no exact match found, since search query guarantees user is requested
-                // If no events at all, fall back to PR creation date
-                let reviewRequestedAt = mostRecentEvent?.createdAt ?? sortedEvents.first?.createdAt ?? node.createdAt
+
+                // Find user's review date as fallback for PRs from reviewed-by query
+                let userReviewDate: String? = {
+                    // Find the user's review in the reviews list
+                    for review in node.reviews.nodes {
+                        guard let authorLogin = review.author?.login else {
+                            continue
+                        }
+                        if authorLogin.lowercased() == username.lowercased() {
+                            return review.createdAt
+                        }
+                    }
+                    return nil
+                }()
+
+                // Fall back to most recent event if no exact match found, then user's review date, then PR creation date
+                let reviewRequestedAt = mostRecentEvent?.createdAt ?? sortedEvents.first?.createdAt ?? userReviewDate ?? node.createdAt
 
                 // Use actor (who requested the review) for categorization
                 // If no matching event, use the most recent event's actor (even if it doesn't match username)
