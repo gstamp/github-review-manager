@@ -19,7 +19,7 @@ enum PRState: String, Codable {
 }
 
 enum ReviewStatus: String, Codable {
-    case pending
+    case waiting
     case approved
     case changesRequested = "changes_requested"
     case commented

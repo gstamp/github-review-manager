@@ -26,7 +26,11 @@ class GitHubService {
         return token != nil
     }
 
-    private func getUsername() async throws -> String {
+    func getUsername() async throws -> String {
+        return try await getUsernameInternal()
+    }
+
+    private func getUsernameInternal() async throws -> String {
         if let cached = cachedUsername {
             return cached
         }
@@ -79,7 +83,7 @@ class GitHubService {
         }
 
         do {
-            let username = try await getUsername()
+            let username = try await getUsernameInternal()
 
             let query = """
             query($searchQuery: String!, $first: Int!) {
@@ -150,7 +154,7 @@ class GitHubService {
                 .filter { !$0.isDraft } // Skip draft PRs
                 .map { node in
                     // Determine review status
-                    var reviewStatus: ReviewStatus = .pending
+                    var reviewStatus: ReviewStatus = .waiting
                     if let latestReview = node.reviews.nodes.last {
                         switch latestReview.state {
                         case "APPROVED":
@@ -160,7 +164,7 @@ class GitHubService {
                         case "COMMENTED":
                             reviewStatus = .commented
                         default:
-                            reviewStatus = .pending
+                            reviewStatus = .waiting
                         }
                     }
 
@@ -241,40 +245,40 @@ class GitHubService {
         }
 
         do {
-            let username = try await getUsername()
+            let username = try await getUsernameInternal()
 
             let query = """
             query($searchQuery: String!, $first: Int!) {
-              search(query: $searchQuery, type: ISSUE, first: $first) {
-                nodes {
-                  ... on PullRequest {
-                    id
-                    number
-                    title
-                    url
-                    state
-                    createdAt
-                    updatedAt
-                    author {
+            search(query: $searchQuery, type: ISSUE, first: $first) {
+              nodes {
+                ... on PullRequest {
+                  id
+                  number
+                  title
+                  url
+                  state
+                  createdAt
+                  updatedAt
+                  author {
+                    login
+                  }
+                  repository {
+                    name
+                    owner {
                       login
                     }
-                    repository {
-                      name
-                      owner {
+                  }
+                  reviews(last: 100) {
+                    nodes {
+                      id
+                      state
+                      author {
                         login
                       }
+                      createdAt
                     }
-                    reviews(last: 100) {
-                      nodes {
-                        id
-                        state
-                        author {
-                          login
-                        }
-                        createdAt
-                      }
-                    }
-                    timelineItems(itemTypes: REVIEW_REQUESTED_EVENT, last: 50) {
+                  }
+                  timelineItems(itemTypes: REVIEW_REQUESTED_EVENT, last: 50) {
                       nodes {
                         ... on ReviewRequestedEvent {
                           createdAt
@@ -350,7 +354,7 @@ class GitHubService {
             // Process all nodes
             let reviewRequests = prMap.values.map { node in
                 // Determine review status
-                var reviewStatus: ReviewStatus = .pending
+                var reviewStatus: ReviewStatus = .waiting
                 if let latestReview = node.reviews.nodes.last {
                     switch latestReview.state {
                     case "APPROVED":
@@ -360,7 +364,7 @@ class GitHubService {
                     case "COMMENTED":
                         reviewStatus = .commented
                     default:
-                        reviewStatus = .pending
+                        reviewStatus = .waiting
                     }
                 }
 
@@ -526,7 +530,7 @@ class GitHubService {
         let seenReviewIds = storageService.loadSeenReviewIds()
 
         // Get username for filtering
-        let username = try await getUsername()
+        let username = try await getUsernameInternal()
 
         // Fetch full PR data with reviews
         let userPRsQuery = """
@@ -676,7 +680,7 @@ class GitHubService {
         let seenRequestIds = storageService.loadSeenReviewRequestIds()
 
         // Get username for filtering
-        let username = try await getUsername()
+        let username = try await getUsernameInternal()
 
         // Use the same query as getReviewRequests to fetch review requests
         let query = """

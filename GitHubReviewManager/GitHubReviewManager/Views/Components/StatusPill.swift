@@ -42,8 +42,8 @@ struct ReviewStatusPill: View {
     var body: some View {
         let (text, color) = {
             switch status {
-            case .pending:
-                return ("pending", Color.orange)
+            case .waiting:
+                return ("waiting", Color.orange)
             case .approved:
                 return ("approved", Color.green)
             case .changesRequested:

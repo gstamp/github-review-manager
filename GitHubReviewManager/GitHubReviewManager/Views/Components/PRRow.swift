@@ -27,9 +27,11 @@ struct PRRow<PR: PRRowItem>: View {
                 Spacer()
 
                 HStack(spacing: 4) {
-                    // Show merge button for PRs that are approved and mergeable
+                    // Show merge button for PRs that are approved and mergeable, and don't have failed status
                     if pr.reviewStatus == .approved,
                        pr.mergeable == true,
+                       pr.statusState != .failure,
+                       pr.statusState != .error,
                        let mergeAction = onMerge {
                         MergeButton(action: mergeAction)
                     }

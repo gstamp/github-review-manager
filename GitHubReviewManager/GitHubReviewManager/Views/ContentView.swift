@@ -107,7 +107,7 @@ struct ContentView: View {
                             },
                             onMerge: { request in
                                 Task {
-                                    await viewModel.mergePR(request)
+                                    await viewModel.requestMergePR(request)
                                 }
                             },
                             showCopyAll: !group.requests.isEmpty,
@@ -130,6 +130,18 @@ struct ContentView: View {
                 await viewModel.loadData()
             }
         }
+        .alert("Confirm Merge", isPresented: $viewModel.showMergeConfirmation) {
+            Button("Cancel", role: .cancel) {
+                viewModel.cancelMergePR()
+            }
+            Button("Merge", role: .destructive) {
+                Task {
+                    await viewModel.confirmMergePR()
+                }
+            }
+        } message: {
+            Text("This is someone else's PR. Are you sure you wish to merge it?")
+        }
     }
 }
 
@@ -142,6 +154,8 @@ class PRViewModel: ObservableObject {
     @Published var loading = false
     @Published var isRefreshing = false
     @Published var error: String?
+    @Published var pendingMergeRequest: ReviewRequest?
+    @Published var showMergeConfirmation = false
 
     private let githubService = GitHubService.shared
     private let storageService = StorageService.shared
@@ -343,6 +357,40 @@ class PRViewModel: ObservableObject {
             await loadData(forceRefresh: true)
             print("Error merging PR: \(error)")
         }
+    }
+
+    func requestMergePR(_ reviewRequest: ReviewRequest) async {
+        // Check if this is someone else's PR from a human
+        do {
+            let currentUsername = try await githubService.getUsername()
+            let isHumanPR = reviewRequest.reviewCategory == "human"
+            let isSomeoneElsesPR = reviewRequest.author.lowercased() != currentUsername.lowercased()
+
+            if isHumanPR && isSomeoneElsesPR {
+                // Show confirmation dialog
+                pendingMergeRequest = reviewRequest
+                showMergeConfirmation = true
+            } else {
+                // No confirmation needed, merge directly
+                await mergePR(reviewRequest)
+            }
+        } catch {
+            // If we can't get username, proceed without confirmation
+            print("Could not get username for merge confirmation: \(error)")
+            await mergePR(reviewRequest)
+        }
+    }
+
+    func confirmMergePR() async {
+        guard let request = pendingMergeRequest else { return }
+        pendingMergeRequest = nil
+        showMergeConfirmation = false
+        await mergePR(request)
+    }
+
+    func cancelMergePR() {
+        pendingMergeRequest = nil
+        showMergeConfirmation = false
     }
 
     func mergePR(_ reviewRequest: ReviewRequest) async {
