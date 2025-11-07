@@ -15,6 +15,7 @@ struct PRListView<PR: PRRowItem & Identifiable>: View {
     let dismissedCount: Int
     let onShowSnoozed: (() -> Void)?
     let onShowDismissed: (() -> Void)?
+    let mergingPRIds: Set<Int>
 
     init(
         prs: [PR],
@@ -29,7 +30,8 @@ struct PRListView<PR: PRRowItem & Identifiable>: View {
         snoozedCount: Int = 0,
         dismissedCount: Int = 0,
         onShowSnoozed: (() -> Void)? = nil,
-        onShowDismissed: (() -> Void)? = nil
+        onShowDismissed: (() -> Void)? = nil,
+        mergingPRIds: Set<Int> = []
     ) {
         self.prs = prs
         self.emptyMessage = emptyMessage
@@ -44,6 +46,7 @@ struct PRListView<PR: PRRowItem & Identifiable>: View {
         self.dismissedCount = dismissedCount
         self.onShowSnoozed = onShowSnoozed
         self.onShowDismissed = onShowDismissed
+        self.mergingPRIds = mergingPRIds
     }
 
     var body: some View {
@@ -88,7 +91,8 @@ struct PRListView<PR: PRRowItem & Identifiable>: View {
                                     {
                                         merge(pr)
                                     }
-                                }
+                                },
+                                isMerging: mergingPRIds.contains(pr.id)
                             )
                             .padding(.horizontal)
                         }

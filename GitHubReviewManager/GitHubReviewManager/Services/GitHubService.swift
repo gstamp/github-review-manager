@@ -13,6 +13,7 @@ class GitHubService {
     private var cachedUserPRs: (data: [PRSummary], timestamp: Date)?
     private var cachedReviewRequests: (data: [ReviewRequest], timestamp: Date)?
     private var cachedMergeMethods: [String: String] = [:] // Cache merge method per "owner/repo"
+    private var cachedMergeQueueRequired: [String: Bool] = [:] // Cache merge queue requirement per "owner/repo/branch"
 
     private init() {}
 
@@ -542,6 +543,7 @@ class GitHubService {
                 number
                 title
                 url
+                state
                 reviews(last: 100) {
                   nodes {
                     id
@@ -567,6 +569,7 @@ class GitHubService {
                 number
                 title
                 url
+                state
                 reviews(last: 100) {
                   nodes {
                     id
@@ -692,6 +695,7 @@ class GitHubService {
                 number
                 title
                 url
+                state
                 author {
                   login
                 }
@@ -889,50 +893,333 @@ class GitHubService {
 
     // MARK: - PR Merge
 
-    /// Merge a pull request using the specified merge method
-    func mergePR(pullRequestId: String, mergeMethod: String) async throws {
+    /// Get the base branch name for a pull request
+    private func getPRBaseBranch(pullRequestId: String) async throws -> String {
         guard token != nil else {
             throw GitHubError.notAuthenticated
         }
 
-        let mutation = """
-        mutation($pullRequestId: ID!, $mergeMethod: PullRequestMergeMethod!) {
-          mergePullRequest(input: {
-            pullRequestId: $pullRequestId
-            mergeMethod: $mergeMethod
-          }) {
-            pullRequest {
-              id
-              merged
+        let query = """
+        query($pullRequestId: ID!) {
+          node(id: $pullRequestId) {
+            ... on PullRequest {
+              baseRefName
             }
           }
         }
         """
 
         let variables: [String: Any] = [
-            "pullRequestId": pullRequestId,
-            "mergeMethod": mergeMethod
+            "pullRequestId": pullRequestId
         ]
 
-        struct MergeResponse: Decodable {
-            let mergePullRequest: MergePullRequest
+        struct BaseBranchResponse: Decodable {
+            let node: PRNode?
         }
 
-        struct MergePullRequest: Decodable {
-            let pullRequest: MergedPR
+        struct PRNode: Decodable {
+            let baseRefName: String
         }
 
-        struct MergedPR: Decodable {
+        let response: GraphQLResponse<BaseBranchResponse> = try await executeGraphQL(
+            query: query,
+            variables: variables
+        )
+
+        guard let baseRefName = response.data.node?.baseRefName else {
+            throw GitHubError.graphQLError("Could not determine base branch for PR")
+        }
+
+        return baseRefName
+    }
+
+    /// Merge a pull request using the specified merge method
+    /// Automatically handles merge queue requirements
+    func mergePR(pullRequestId: String, mergeMethod: String, owner: String, repo: String) async throws {
+        guard token != nil else {
+            throw GitHubError.notAuthenticated
+        }
+
+        // Check if merge queue is required for this repository/branch
+        do {
+            let baseBranch = try await getPRBaseBranch(pullRequestId: pullRequestId)
+            let requiresQueue = try await requiresMergeQueue(owner: owner, repo: repo, branch: baseBranch)
+
+            if requiresQueue {
+                print("Repository requires merge queue, enqueueing PR instead of merging directly...")
+                try await enqueuePR(pullRequestId: pullRequestId)
+                throw GitHubError.mergeQueued
+            }
+        } catch let queueError {
+            // If it's our mergeQueued error, rethrow it
+            if case GitHubError.mergeQueued = queueError {
+                throw queueError
+            }
+            // If checking fails, log but continue with merge attempt
+            // (fallback to error-based detection)
+            print("Could not check merge queue requirement, will attempt merge: \(queueError)")
+        }
+
+        // Attempt merge - wrap in do-catch to handle errors from executeGraphQL
+        do {
+            let mutation = """
+            mutation($pullRequestId: ID!, $mergeMethod: PullRequestMergeMethod!) {
+              mergePullRequest(input: {
+                pullRequestId: $pullRequestId
+                mergeMethod: $mergeMethod
+              }) {
+                pullRequest {
+                  id
+                  merged
+                }
+              }
+            }
+            """
+
+            let variables: [String: Any] = [
+                "pullRequestId": pullRequestId,
+                "mergeMethod": mergeMethod
+            ]
+
+            struct MergeResponse: Decodable {
+                let mergePullRequest: MergePullRequest
+            }
+
+            struct MergePullRequest: Decodable {
+                let pullRequest: MergedPR
+            }
+
+            struct MergedPR: Decodable {
+                let id: String
+                let merged: Bool
+            }
+
+            let response: GraphQLResponse<MergeResponse> = try await executeGraphQL(
+                query: mutation,
+                variables: variables
+            )
+
+            // Check for GraphQL errors in response
+            if let errors = response.errors, !errors.isEmpty {
+                let errorMessages = errors.map { $0.message }.joined(separator: "; ")
+                print("GraphQL errors in merge response: \(errorMessages)")
+                print("Error messages (raw): \(errors.map { $0.message })")
+
+                // Check if this is a merge queue error - if so, try enqueueing instead
+                // This handles both branch protection merge queues and repository rule merge queues
+                let lowercasedError = errorMessages.lowercased()
+                print("Checking for merge queue error patterns in: \(lowercasedError)")
+
+                let isMergeQueueError = lowercasedError.contains("merge queue") ||
+                                        lowercasedError.contains("must be enqueued") ||
+                                        lowercasedError.contains("must be made through") ||
+                                        lowercasedError.contains("cannot be merged directly") ||
+                                        lowercasedError.contains("pull request is in a merge queue") ||
+                                        lowercasedError.contains("repository rule violations") ||
+                                        (lowercasedError.contains("repository rule") && lowercasedError.contains("merge"))
+
+                print("Is merge queue error: \(isMergeQueueError)")
+
+                if isMergeQueueError {
+                    print("Detected merge queue requirement from error: \(errorMessages)")
+                    print("Attempting to enqueue PR instead of merging directly...")
+                    // Try to enqueue instead of merging directly
+                    do {
+                        try await enqueuePR(pullRequestId: pullRequestId)
+                        print("Successfully enqueued PR to merge queue")
+                        // Enqueue succeeded - throw a special error that indicates success but needs different handling
+                        throw GitHubError.mergeQueued
+                    } catch let enqueueError {
+                        print("Failed to enqueue PR: \(enqueueError)")
+                        // If it's already our special queued error, rethrow it
+                        if case GitHubError.mergeQueued = enqueueError {
+                            throw enqueueError
+                        }
+                        // If enqueue also fails, throw the original merge error with context
+                        throw GitHubError.graphQLError("This repository uses a merge queue. Failed to enqueue PR: \(errorMessages)")
+                    }
+                }
+
+                throw GitHubError.graphQLError(errorMessages)
+            }
+
+            // Verify that the merge actually succeeded
+            let merged = response.data.mergePullRequest.pullRequest.merged
+            if !merged {
+                let errorMessage = "Merge request completed but PR was not merged. The PR may have conflicts, failed checks, or other restrictions."
+                print("Merge failed: \(errorMessage)")
+                throw GitHubError.graphQLError(errorMessage)
+            }
+
+            print("Merge successful. PR ID: \(response.data.mergePullRequest.pullRequest.id)")
+
+            // Invalidate cache after merge
+            invalidateCache()
+        } catch let mergeError {
+            // Check if this is a merge queue error that was thrown from executeGraphQL
+            if case GitHubError.graphQLError(let errorMessage) = mergeError {
+                let lowercasedError = errorMessage.lowercased()
+                let isMergeQueueError = lowercasedError.contains("merge queue") ||
+                                        lowercasedError.contains("must be enqueued") ||
+                                        lowercasedError.contains("must be made through") ||
+                                        lowercasedError.contains("cannot be merged directly") ||
+                                        lowercasedError.contains("pull request is in a merge queue") ||
+                                        lowercasedError.contains("repository rule violations") ||
+                                        (lowercasedError.contains("repository rule") && lowercasedError.contains("merge"))
+
+                if isMergeQueueError {
+                    print("Detected merge queue error from executeGraphQL: \(errorMessage)")
+                    print("Attempting to enqueue PR instead...")
+                    do {
+                        try await enqueuePR(pullRequestId: pullRequestId)
+                        print("Successfully enqueued PR to merge queue")
+                        throw GitHubError.mergeQueued
+                    } catch let enqueueError {
+                        if case GitHubError.mergeQueued = enqueueError {
+                            throw enqueueError
+                        }
+                        throw GitHubError.graphQLError("This repository uses a merge queue. Failed to enqueue PR: \(errorMessage)")
+                    }
+                }
+            }
+            // Re-throw the original error if not a merge queue error
+            throw mergeError
+        }
+    }
+
+    // MARK: - PR Merge Queue
+
+    /// Check if a repository branch requires merge queue
+    /// Returns true if merge queue is required, false otherwise
+    func requiresMergeQueue(owner: String, repo: String, branch: String) async throws -> Bool {
+        let cacheKey = "\(owner)/\(repo)/\(branch)"
+
+        // Return cached value if available
+        if let cached = cachedMergeQueueRequired[cacheKey] {
+            return cached
+        }
+
+        guard token != nil else {
+            throw GitHubError.notAuthenticated
+        }
+
+        let query = """
+        query($owner: String!, $repo: String!, $branch: String!) {
+          repository(owner: $owner, name: $repo) {
+            mergeQueue(branch: $branch) {
+              id
+            }
+            defaultBranchRef {
+              name
+            }
+          }
+        }
+        """
+
+        let variables: [String: Any] = [
+            "owner": owner,
+            "repo": repo,
+            "branch": branch
+        ]
+
+        struct MergeQueueCheckResponse: Decodable {
+            let repository: MergeQueueRepository?
+        }
+
+        struct MergeQueueRepository: Decodable {
+            let mergeQueue: MergeQueue?
+            let defaultBranchRef: DefaultBranchRef?
+        }
+
+        struct MergeQueue: Decodable {
             let id: String
-            let merged: Bool
         }
 
-        _ = try await executeGraphQL(
+        struct DefaultBranchRef: Decodable {
+            let name: String
+        }
+
+        do {
+            let response: GraphQLResponse<MergeQueueCheckResponse> = try await executeGraphQL(
+                query: query,
+                variables: variables
+            )
+
+            // If mergeQueue exists, it means merge queue is configured for this branch
+            let requiresQueue = response.data.repository?.mergeQueue != nil
+
+            // Cache the result
+            cachedMergeQueueRequired[cacheKey] = requiresQueue
+            return requiresQueue
+        } catch {
+            // If query fails (e.g., branch doesn't exist or no access), assume no merge queue
+            // This is a fallback - we'll still try merge and handle errors if needed
+            print("Could not check merge queue requirement: \(error)")
+            cachedMergeQueueRequired[cacheKey] = false
+            return false
+        }
+    }
+
+    /// Enqueue a pull request to the merge queue
+    func enqueuePR(pullRequestId: String) async throws {
+        guard token != nil else {
+            throw GitHubError.notAuthenticated
+        }
+
+        let mutation = """
+        mutation($pullRequestId: ID!) {
+          enqueuePullRequest(input: {
+            pullRequestId: $pullRequestId
+          }) {
+            mergeQueueEntry {
+              id
+              position
+            }
+          }
+        }
+        """
+
+        let variables: [String: Any] = [
+            "pullRequestId": pullRequestId
+        ]
+
+        struct EnqueueResponse: Decodable {
+            let enqueuePullRequest: EnqueuePullRequest?
+        }
+
+        struct EnqueuePullRequest: Decodable {
+            let mergeQueueEntry: MergeQueueEntry?
+        }
+
+        struct MergeQueueEntry: Decodable {
+            let id: String
+            let position: Int
+        }
+
+        let response: GraphQLResponse<EnqueueResponse> = try await executeGraphQL(
             query: mutation,
             variables: variables
-        ) as GraphQLResponse<MergeResponse>
+        )
 
-        // Invalidate cache after merge
+        // Check for GraphQL errors in response
+        if let errors = response.errors, !errors.isEmpty {
+            let errorMessages = errors.map { $0.message }.joined(separator: "; ")
+            print("GraphQL errors in enqueue response: \(errorMessages)")
+            throw GitHubError.graphQLError(errorMessages)
+        }
+
+        // Check if enqueue was successful
+        guard let enqueueResult = response.data.enqueuePullRequest else {
+            throw GitHubError.graphQLError("Failed to enqueue PR to merge queue")
+        }
+
+        if let entry = enqueueResult.mergeQueueEntry {
+            print("PR enqueued successfully. Queue position: \(entry.position)")
+        } else {
+            print("PR enqueued successfully (no position info available)")
+        }
+
+        // Invalidate cache after enqueue
         invalidateCache()
     }
 }
@@ -1119,6 +1406,7 @@ enum GitHubError: LocalizedError {
     case invalidResponse
     case httpError(statusCode: Int)
     case graphQLError(String)
+    case mergeQueued
 
     var errorDescription: String? {
         switch self {
@@ -1130,6 +1418,8 @@ enum GitHubError: LocalizedError {
             return "HTTP error: \(statusCode)"
         case .graphQLError(let message):
             return "GraphQL error: \(message)"
+        case .mergeQueued:
+            return "PR has been added to the merge queue"
         }
     }
 }

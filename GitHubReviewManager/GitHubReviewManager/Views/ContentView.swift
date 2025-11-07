@@ -123,7 +123,8 @@ struct ContentView: View {
                                     print("Error fetching snoozed/dismissed PRs: \(error)")
                                 }
                             }
-                        }
+                        },
+                        mergingPRIds: viewModel.mergingPRIds
                     )
                     .tabItem {
                         Text("My PRs (\(viewModel.myPRsCount))")
@@ -197,7 +198,8 @@ struct ContentView: View {
                                         print("Error fetching snoozed/dismissed PRs: \(error)")
                                     }
                                 }
-                            }
+                            },
+                            mergingPRIds: viewModel.mergingPRIds
                         )
                         .tabItem {
                             Text("\(group.categoryLabel) (\(group.requests.count))")
@@ -224,6 +226,17 @@ struct ContentView: View {
             }
         } message: {
             Text("This is someone else's PR. Are you sure you wish to merge it?")
+        }
+        .alert("Merge Failed", isPresented: $viewModel.showMergeError) {
+            Button("OK", role: .cancel) {
+                viewModel.dismissMergeError()
+            }
+        } message: {
+            if let error = viewModel.mergeError {
+                Text(error)
+            } else {
+                Text("An unknown error occurred while merging the PR.")
+            }
         }
         .sheet(isPresented: $showSnoozePicker) {
             SnoozePicker(
@@ -297,6 +310,9 @@ class PRViewModel: ObservableObject {
     @Published var error: String?
     @Published var pendingMergeRequest: ReviewRequest?
     @Published var showMergeConfirmation = false
+    @Published var mergingPRIds: Set<Int> = []
+    @Published var mergeError: String?
+    @Published var showMergeError = false
 
     private var allUserPRs: [PRSummary] = [] // All PRs including snoozed/dismissed
     private var allReviewRequests: [ReviewRequest] = [] // All requests including snoozed/dismissed
@@ -536,9 +552,15 @@ class PRViewModel: ObservableObject {
     }
 
     func mergePR(_ pr: PRSummary) async {
-        // Optimistically remove PR from list (merged PRs are closed)
         let prId = pr.id
-        userPRs.removeAll { $0.id == prId }
+
+        // Mark PR as merging
+        mergingPRIds.insert(prId)
+
+        defer {
+            // Always remove from merging set when done
+            mergingPRIds.remove(prId)
+        }
 
         do {
             // Get repository merge method (cached, so minimal API calls)
@@ -546,14 +568,43 @@ class PRViewModel: ObservableObject {
                 owner: pr.repoOwner,
                 repo: pr.repoName
             )
-            try await githubService.mergePR(pullRequestId: pr.graphQLId, mergeMethod: mergeMethod)
+            try await githubService.mergePR(
+                pullRequestId: pr.graphQLId,
+                mergeMethod: mergeMethod,
+                owner: pr.repoOwner,
+                repo: pr.repoName
+            )
             print("Successfully merged PR #\(pr.number)")
-            // Invalidate cache but don't reload - we've already updated locally
+
+            // Remove PR from list only after successful merge confirmation
+            userPRs.removeAll { $0.id == prId }
+
+            // Invalidate cache and refresh to ensure we have accurate state
             githubService.invalidateCache()
-        } catch {
-            // Revert optimistic update on error - reload to restore
             await loadData(forceRefresh: true)
-            print("Error merging PR: \(error)")
+        } catch GitHubError.mergeQueued {
+            // PR was successfully enqueued to merge queue
+            print("PR #\(pr.number) successfully enqueued to merge queue")
+            // Don't remove PR from list - it's queued but not merged yet
+            // Refresh to show updated status
+            githubService.invalidateCache()
+            await loadData(forceRefresh: true)
+        } catch {
+            print("Error merging PR #\(pr.number) (\(pr.repoOwner)/\(pr.repoName)): \(error)")
+
+            // Show error alert to user
+            let errorMessage: String = {
+                if let githubError = error as? GitHubError {
+                    return githubError.localizedDescription
+                } else {
+                    return error.localizedDescription
+                }
+            }()
+
+            // Format error message with PR details
+            let fullErrorMessage = "Failed to merge PR #\(pr.number): \(pr.title)\n\n\(errorMessage)"
+            mergeError = fullErrorMessage
+            showMergeError = true
         }
     }
 
@@ -592,9 +643,15 @@ class PRViewModel: ObservableObject {
     }
 
     func mergePR(_ reviewRequest: ReviewRequest) async {
-        // Optimistically remove PR from list (merged PRs are closed)
         let prId = reviewRequest.id
-        reviewRequests.removeAll { $0.id == prId }
+
+        // Mark PR as merging
+        mergingPRIds.insert(prId)
+
+        defer {
+            // Always remove from merging set when done
+            mergingPRIds.remove(prId)
+        }
 
         do {
             // Get repository merge method (cached, so minimal API calls)
@@ -602,15 +659,49 @@ class PRViewModel: ObservableObject {
                 owner: reviewRequest.repoOwner,
                 repo: reviewRequest.repoName
             )
-            try await githubService.mergePR(pullRequestId: reviewRequest.graphQLId, mergeMethod: mergeMethod)
+            try await githubService.mergePR(
+                pullRequestId: reviewRequest.graphQLId,
+                mergeMethod: mergeMethod,
+                owner: reviewRequest.repoOwner,
+                repo: reviewRequest.repoName
+            )
             print("Successfully merged PR #\(reviewRequest.number)")
-            // Invalidate cache but don't reload - we've already updated locally
+
+            // Remove PR from list only after successful merge confirmation
+            reviewRequests.removeAll { $0.id == prId }
+
+            // Invalidate cache and refresh to ensure we have accurate state
             githubService.invalidateCache()
-        } catch {
-            // Revert optimistic update on error - reload to restore
             await loadData(forceRefresh: true)
-            print("Error merging PR: \(error)")
+        } catch GitHubError.mergeQueued {
+            // PR was successfully enqueued to merge queue
+            print("PR #\(reviewRequest.number) successfully enqueued to merge queue")
+            // Don't remove PR from list - it's queued but not merged yet
+            // Refresh to show updated status
+            githubService.invalidateCache()
+            await loadData(forceRefresh: true)
+        } catch {
+            print("Error merging PR #\(reviewRequest.number) (\(reviewRequest.repoOwner)/\(reviewRequest.repoName)): \(error)")
+
+            // Show error alert to user
+            let errorMessage: String = {
+                if let githubError = error as? GitHubError {
+                    return githubError.localizedDescription
+                } else {
+                    return error.localizedDescription
+                }
+            }()
+
+            // Format error message with PR details
+            let fullErrorMessage = "Failed to merge PR #\(reviewRequest.number): \(reviewRequest.title)\n\n\(errorMessage)"
+            mergeError = fullErrorMessage
+            showMergeError = true
         }
+    }
+
+    func dismissMergeError() {
+        mergeError = nil
+        showMergeError = false
     }
 
     func getSnoozedPRs() async throws -> ([PRSummary], [ReviewRequest]) {

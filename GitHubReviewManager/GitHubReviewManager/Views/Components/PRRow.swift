@@ -8,6 +8,7 @@ struct PRRow<PR: PRRowItem>: View {
     let onSnooze: (() -> Void)?
     let onApprove: (() -> Void)?
     let onMerge: (() -> Void)?
+    let isMerging: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -34,7 +35,7 @@ struct PRRow<PR: PRRowItem>: View {
                        pr.statusState != .failure,
                        pr.statusState != .error,
                        let mergeAction = onMerge {
-                        MergeButton(action: mergeAction)
+                        MergeButton(action: mergeAction, isLoading: isMerging)
                     }
 
                     // Show approve button for ReviewRequests that haven't been approved and don't have failing builds

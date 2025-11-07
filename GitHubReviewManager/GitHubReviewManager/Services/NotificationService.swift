@@ -88,5 +88,26 @@ class NotificationService {
             }
         }
     }
+
+    /// Send a notification for merge errors
+    func sendMergeErrorNotification(prNumber: Int, prTitle: String, errorMessage: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "Failed to Merge PR #\(prNumber)"
+        content.body = "\(prTitle)"
+        content.subtitle = errorMessage
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: UUID().uuidString,
+            content: content,
+            trigger: nil // Send immediately
+        )
+
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error = error {
+                print("Error sending merge error notification: \(error)")
+            }
+        }
+    }
 }
 
