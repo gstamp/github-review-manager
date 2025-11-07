@@ -5,6 +5,7 @@ struct PRRow<PR: PRRowItem>: View {
     let pr: PR
     let onCopy: () -> Void
     let onDismiss: () -> Void
+    let onSnooze: (() -> Void)?
     let onApprove: (() -> Void)?
     let onMerge: (() -> Void)?
 
@@ -45,6 +46,9 @@ struct PRRow<PR: PRRowItem>: View {
                     }
 
                     CopyButton(action: onCopy)
+                    if let snoozeAction = onSnooze {
+                        SnoozeButton(action: snoozeAction)
+                    }
                     Button(action: onDismiss) {
                         Text("×")
                             .font(.title2)

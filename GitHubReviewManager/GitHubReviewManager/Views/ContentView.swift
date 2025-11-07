@@ -4,6 +4,13 @@ import AppKit
 struct ContentView: View {
     @StateObject private var viewModel = PRViewModel()
     @State private var selectedTab: TabIdentifier = .myPRs
+    @State private var showSnoozePicker = false
+    @State private var snoozedPRId: Int?
+    @State private var showSnoozedDismissed = false
+    @State private var snoozedPRs: [PRSummary] = []
+    @State private var snoozedRequests: [ReviewRequest] = []
+    @State private var dismissedPRs: [PRSummary] = []
+    @State private var dismissedRequests: [ReviewRequest] = []
 
     enum TabIdentifier: Hashable {
         case myPRs
@@ -70,6 +77,10 @@ struct ContentView: View {
                                 await viewModel.dismissPR(pr.id)
                             }
                         },
+                        onSnooze: { pr in
+                            snoozedPRId = pr.id
+                            showSnoozePicker = true
+                        },
                         onApprove: nil,
                         onMerge: { pr in
                             Task {
@@ -80,6 +91,38 @@ struct ContentView: View {
                         onCopyAll: {
                             let messages = viewModel.userPRs.map { SlackFormatter.formatMessage(pr: $0) }
                             SlackFormatter.copyToClipboard(messages.joined(separator: "\n"))
+                        },
+                        snoozedCount: viewModel.getSnoozedCount(for: viewModel.userPRs),
+                        dismissedCount: viewModel.getDismissedCount(for: viewModel.userPRs),
+                        onShowSnoozed: {
+                            Task {
+                                do {
+                                    let (allPRs, _) = try await viewModel.getSnoozedPRs()
+                                    snoozedPRs = allPRs
+                                    snoozedRequests = []
+                                    let (allDismissedPRs, _) = try await viewModel.getDismissedPRs()
+                                    dismissedPRs = allDismissedPRs
+                                    dismissedRequests = []
+                                    showSnoozedDismissed = true
+                                } catch {
+                                    print("Error fetching snoozed/dismissed PRs: \(error)")
+                                }
+                            }
+                        },
+                        onShowDismissed: {
+                            Task {
+                                do {
+                                    let (allDismissedPRs, _) = try await viewModel.getDismissedPRs()
+                                    dismissedPRs = allDismissedPRs
+                                    dismissedRequests = []
+                                    let (allPRs, _) = try await viewModel.getSnoozedPRs()
+                                    snoozedPRs = allPRs
+                                    snoozedRequests = []
+                                    showSnoozedDismissed = true
+                                } catch {
+                                    print("Error fetching snoozed/dismissed PRs: \(error)")
+                                }
+                            }
                         }
                     )
                     .tabItem {
@@ -100,6 +143,10 @@ struct ContentView: View {
                                     await viewModel.dismissPR(request.id)
                                 }
                             },
+                            onSnooze: { request in
+                                snoozedPRId = request.id
+                                showSnoozePicker = true
+                            },
                             onApprove: { request in
                                 Task {
                                     await viewModel.approvePR(request)
@@ -114,6 +161,42 @@ struct ContentView: View {
                             onCopyAll: {
                                 let messages = group.requests.map { SlackFormatter.formatMessage(pr: $0) }
                                 SlackFormatter.copyToClipboard(messages.joined(separator: "\n"))
+                            },
+                            snoozedCount: viewModel.getSnoozedCount(for: group.requests, category: group.category),
+                            dismissedCount: viewModel.getDismissedCount(for: group.requests, category: group.category),
+                            onShowSnoozed: {
+                                Task {
+                                    do {
+                                        let (_, allRequests) = try await viewModel.getSnoozedPRs()
+                                        let tabRequests = allRequests.filter { $0.reviewCategory == group.category }
+                                        snoozedPRs = []
+                                        snoozedRequests = tabRequests
+                                        let (_, allDismissedRequests) = try await viewModel.getDismissedPRs()
+                                        let tabDismissedRequests = allDismissedRequests.filter { $0.reviewCategory == group.category }
+                                        dismissedPRs = []
+                                        dismissedRequests = tabDismissedRequests
+                                        showSnoozedDismissed = true
+                                    } catch {
+                                        print("Error fetching snoozed/dismissed PRs: \(error)")
+                                    }
+                                }
+                            },
+                            onShowDismissed: {
+                                Task {
+                                    do {
+                                        let (_, allDismissedRequests) = try await viewModel.getDismissedPRs()
+                                        let tabDismissedRequests = allDismissedRequests.filter { $0.reviewCategory == group.category }
+                                        dismissedPRs = []
+                                        dismissedRequests = tabDismissedRequests
+                                        let (_, allRequests) = try await viewModel.getSnoozedPRs()
+                                        let tabRequests = allRequests.filter { $0.reviewCategory == group.category }
+                                        snoozedPRs = []
+                                        snoozedRequests = tabRequests
+                                        showSnoozedDismissed = true
+                                    } catch {
+                                        print("Error fetching snoozed/dismissed PRs: \(error)")
+                                    }
+                                }
                             }
                         )
                         .tabItem {
@@ -142,6 +225,64 @@ struct ContentView: View {
         } message: {
             Text("This is someone else's PR. Are you sure you wish to merge it?")
         }
+        .sheet(isPresented: $showSnoozePicker) {
+            SnoozePicker(
+                onSelect: { duration in
+                    if let prId = snoozedPRId {
+                        showSnoozePicker = false
+                        let prIdToSnooze = prId
+                        snoozedPRId = nil
+                        Task {
+                            await viewModel.snoozePR(prIdToSnooze, duration: duration)
+                        }
+                    }
+                },
+                onCancel: {
+                    showSnoozePicker = false
+                    snoozedPRId = nil
+                }
+            )
+        }
+        .sheet(isPresented: $showSnoozedDismissed) {
+            SnoozedDismissedView(
+                snoozedPRs: snoozedPRs,
+                snoozedRequests: snoozedRequests,
+                dismissedPRs: dismissedPRs,
+                dismissedRequests: dismissedRequests,
+                onUnsnooze: { prId in
+                    Task {
+                        await viewModel.unsnoozePR(prId)
+                        // Refresh the lists
+                        do {
+                            let (sPrs, sRequests) = try await viewModel.getSnoozedPRs()
+                            snoozedPRs = sPrs
+                            snoozedRequests = sRequests
+                            let (dPrs, dRequests) = try await viewModel.getDismissedPRs()
+                            dismissedPRs = dPrs
+                            dismissedRequests = dRequests
+                        } catch {
+                            print("Error refreshing snoozed/dismissed PRs: \(error)")
+                        }
+                    }
+                },
+                onUndismiss: { prId in
+                    Task {
+                        await viewModel.undismissPR(prId)
+                        // Refresh the lists
+                        do {
+                            let (sPrs, sRequests) = try await viewModel.getSnoozedPRs()
+                            snoozedPRs = sPrs
+                            snoozedRequests = sRequests
+                            let (dPrs, dRequests) = try await viewModel.getDismissedPRs()
+                            dismissedPRs = dPrs
+                            dismissedRequests = dRequests
+                        } catch {
+                            print("Error refreshing snoozed/dismissed PRs: \(error)")
+                        }
+                    }
+                }
+            )
+        }
     }
 }
 
@@ -157,6 +298,9 @@ class PRViewModel: ObservableObject {
     @Published var pendingMergeRequest: ReviewRequest?
     @Published var showMergeConfirmation = false
 
+    private var allUserPRs: [PRSummary] = [] // All PRs including snoozed/dismissed
+    private var allReviewRequests: [ReviewRequest] = [] // All requests including snoozed/dismissed
+
     private let githubService = GitHubService.shared
     private let storageService = StorageService.shared
     private let authService = AuthService.shared
@@ -166,6 +310,42 @@ class PRViewModel: ObservableObject {
 
     var myPRsCount: Int {
         userPRs.count
+    }
+
+    func getSnoozedCount(for prs: [PRSummary]) -> Int {
+        let snoozedIds = Set(storageService.getSnoozedPRIds())
+        let allPRIds = Set(allUserPRs.map { $0.id })
+        return snoozedIds.intersection(allPRIds).count
+    }
+
+    func getDismissedCount(for prs: [PRSummary]) -> Int {
+        let dismissedIds = Set(storageService.getDismissedPRIds())
+        let allPRIds = Set(allUserPRs.map { $0.id })
+        return dismissedIds.intersection(allPRIds).count
+    }
+
+    func getSnoozedCount(for requests: [ReviewRequest]) -> Int {
+        let snoozedIds = Set(storageService.getSnoozedPRIds())
+        let allRequestIds = Set(allReviewRequests.map { $0.id })
+        return snoozedIds.intersection(allRequestIds).count
+    }
+
+    func getDismissedCount(for requests: [ReviewRequest]) -> Int {
+        let dismissedIds = Set(storageService.getDismissedPRIds())
+        let allRequestIds = Set(allReviewRequests.map { $0.id })
+        return dismissedIds.intersection(allRequestIds).count
+    }
+
+    func getSnoozedCount(for requests: [ReviewRequest], category: String) -> Int {
+        let snoozedIds = Set(storageService.getSnoozedPRIds())
+        let categoryRequestIds = Set(allReviewRequests.filter { $0.reviewCategory == category }.map { $0.id })
+        return snoozedIds.intersection(categoryRequestIds).count
+    }
+
+    func getDismissedCount(for requests: [ReviewRequest], category: String) -> Int {
+        let dismissedIds = Set(storageService.getDismissedPRIds())
+        let categoryRequestIds = Set(allReviewRequests.filter { $0.reviewCategory == category }.map { $0.id })
+        return dismissedIds.intersection(categoryRequestIds).count
     }
 
     var categoryGroups: [CategoryGroup] {
@@ -242,9 +422,15 @@ class PRViewModel: ObservableObject {
                 githubService.getReviewRequests(forceRefresh: forceRefresh)
             )
 
-            // Filter out dismissed PRs
+            // Store all PRs for count calculations
+            allUserPRs = prs
+            allReviewRequests = requests
+
+            // Filter out dismissed and snoozed PRs for display
             userPRs = storageService.filterDismissed(prs)
+            userPRs = storageService.filterSnoozed(userPRs)
             reviewRequests = storageService.filterDismissed(requests)
+            reviewRequests = storageService.filterSnoozed(reviewRequests)
 
             // Detect and notify about new reviews
             do {
@@ -308,9 +494,21 @@ class PRViewModel: ObservableObject {
 
     func dismissPR(_ prId: Int) async {
         storageService.dismissPr(prId)
-        // Invalidate cache and reload
+        // Optimistically remove from visible lists immediately
+        userPRs.removeAll { $0.id == prId }
+        reviewRequests.removeAll { $0.id == prId }
+        // Invalidate cache for next refresh, but don't reload now
         githubService.invalidateCache()
-        await loadData(forceRefresh: true)
+    }
+
+    func snoozePR(_ prId: Int, duration: SnoozeDuration) async {
+        let expirationDate = duration.expirationDate
+        storageService.snoozePr(prId, until: expirationDate)
+        // Optimistically remove from visible lists immediately
+        userPRs.removeAll { $0.id == prId }
+        reviewRequests.removeAll { $0.id == prId }
+        // Invalidate cache for next refresh, but don't reload now
+        githubService.invalidateCache()
     }
 
     func approvePR(_ reviewRequest: ReviewRequest) async {
@@ -413,6 +611,70 @@ class PRViewModel: ObservableObject {
             await loadData(forceRefresh: true)
             print("Error merging PR: \(error)")
         }
+    }
+
+    func getSnoozedPRs() async throws -> ([PRSummary], [ReviewRequest]) {
+        let (allPRs, allRequests) = try await (
+            githubService.getUserOpenPRs(forceRefresh: false),
+            githubService.getReviewRequests(forceRefresh: false)
+        )
+
+        let snoozedIds = Set(storageService.getSnoozedPRIds())
+        let snoozedPRs = allPRs.filter { snoozedIds.contains($0.id) }
+        let snoozedRequests = allRequests.filter { snoozedIds.contains($0.id) }
+
+        return (snoozedPRs, snoozedRequests)
+    }
+
+    func getDismissedPRs() async throws -> ([PRSummary], [ReviewRequest]) {
+        let (allPRs, allRequests) = try await (
+            githubService.getUserOpenPRs(forceRefresh: false),
+            githubService.getReviewRequests(forceRefresh: false)
+        )
+
+        let dismissedIds = Set(storageService.getDismissedPRIds())
+        let dismissedPRs = allPRs.filter { dismissedIds.contains($0.id) }
+        let dismissedRequests = allRequests.filter { dismissedIds.contains($0.id) }
+
+        return (dismissedPRs, dismissedRequests)
+    }
+
+    func unsnoozePR(_ prId: Int) async {
+        storageService.unsnoozePr(prId)
+        // Restore PR to visible lists if it exists in our stored data and is not dismissed
+        if !storageService.isPrDismissed(prId) {
+            if let pr = allUserPRs.first(where: { $0.id == prId }) {
+                if !userPRs.contains(where: { $0.id == prId }) {
+                    userPRs.append(pr)
+                }
+            }
+            if let request = allReviewRequests.first(where: { $0.id == prId }) {
+                if !reviewRequests.contains(where: { $0.id == prId }) {
+                    reviewRequests.append(request)
+                }
+            }
+        }
+        // Invalidate cache for next refresh, but don't reload now
+        githubService.invalidateCache()
+    }
+
+    func undismissPR(_ prId: Int) async {
+        storageService.undismissPr(prId)
+        // Restore PR to visible lists if it exists in our stored data and is not snoozed
+        if !storageService.isPrSnoozed(prId) {
+            if let pr = allUserPRs.first(where: { $0.id == prId }) {
+                if !userPRs.contains(where: { $0.id == prId }) {
+                    userPRs.append(pr)
+                }
+            }
+            if let request = allReviewRequests.first(where: { $0.id == prId }) {
+                if !reviewRequests.contains(where: { $0.id == prId }) {
+                    reviewRequests.append(request)
+                }
+            }
+        }
+        // Invalidate cache for next refresh, but don't reload now
+        githubService.invalidateCache()
     }
 
     // MARK: - Local State Updates
