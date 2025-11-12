@@ -80,11 +80,13 @@ class TrayMenuManager {
             // Show popover relative to status item button
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
 
-            // Enable mouse tracking and focus the window so hover cursors work immediately
+            // Configure window to accept mouse clicks even when not focused
             // Use a small delay to ensure window is shown first
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 if let window = popover.contentViewController?.view.window {
                     window.acceptsMouseMovedEvents = true
+                    // Allow window to receive mouse clicks even when not key
+                    window.ignoresMouseEvents = false
                     // Make the window key so it receives focus and hover events work
                     window.makeKey()
                 }
