@@ -497,11 +497,14 @@ class PRViewModel: ObservableObject {
         refreshTimer?.invalidate()
 
         // Create new timer that fires every 5 minutes
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
+        // Use .common modes so it runs even when popover is open (NSEventTrackingRunLoopMode)
+        let timer = Timer(timeInterval: refreshInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 await self?.loadData(forceRefresh: true)
             }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        refreshTimer = timer
     }
 
     deinit {
