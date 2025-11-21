@@ -592,7 +592,7 @@ class GitHubService {
             "first": 100
         ]
 
-        let userPRResponse: GraphQLResponse<SearchQuery<UserOpenPRNode>> = try await executeGraphQL(
+        let userPRResponse: GraphQLResponse<SearchQuery<ReviewDetectionPRNode>> = try await executeGraphQL(
             query: userPRsQuery,
             variables: userPRVariables
         )
@@ -603,7 +603,7 @@ class GitHubService {
             "first": 100
         ]
 
-        let reviewRequestResponse: GraphQLResponse<SearchQuery<ReviewRequestNode>> = try await executeGraphQL(
+        let reviewRequestResponse: GraphQLResponse<SearchQuery<ReviewDetectionPRNode>> = try await executeGraphQL(
             query: reviewRequestsQuery,
             variables: reviewRequestVariables
         )
@@ -739,7 +739,7 @@ class GitHubService {
             "first": 100
         ]
 
-        let response: GraphQLResponse<SearchQuery<ReviewRequestNode>> = try await executeGraphQL(
+        let response: GraphQLResponse<SearchQuery<ReviewRequestDetectionNode>> = try await executeGraphQL(
             query: query,
             variables: variables
         )
@@ -1238,6 +1238,20 @@ struct NewReviewRequest {
     let prNumber: Int
     let prTitle: String
     let reviewCategory: String
+}
+
+struct ReviewDetectionPRNode: Decodable {
+    let id: String
+    let number: Int
+    let title: String
+    let reviews: Reviews
+}
+
+struct ReviewRequestDetectionNode: Decodable {
+    let id: String
+    let number: Int
+    let title: String
+    let author: Author?
 }
 
 // MARK: - GraphQL Response Types
