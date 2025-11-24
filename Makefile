@@ -4,7 +4,8 @@
 APP_NAME = GitHubReviewManager
 APP_BUNDLE = GitHubReviewManager/.build/$(APP_NAME).app
 APP_PATH = $(APP_BUNDLE)/Contents/MacOS/$(APP_NAME)
-INSTALL_PATH = /Applications/$(APP_NAME).app
+INSTALL_DIR = $(HOME)/Applications
+INSTALL_PATH = $(INSTALL_DIR)/$(APP_NAME).app
 DMG_NAME = $(APP_NAME).dmg
 DMG_VOLNAME = "GitHub Review Manager"
 
@@ -19,7 +20,7 @@ help:
 	@echo "  make clean       - Remove build artifacts"
 	@echo "  make sign        - Code sign with ad-hoc signature (development)"
 	@echo "  make sign-dist   - Code sign with Developer ID (requires SIGNING_IDENTITY)"
-	@echo "  make install     - Install to /Applications"
+	@echo "  make install     - Install to ~/Applications"
 	@echo "  make dmg         - Create a DMG for distribution"
 	@echo "  make check       - Check if build artifacts exist"
 	@echo ""
@@ -57,13 +58,13 @@ open:
 	fi
 
 # Code sign with ad-hoc signature (for development)
-sign: $(APP_BUNDLE)
+sign: build
 	@echo "Code signing with ad-hoc signature..."
 	@codesign --deep --force --sign - "$(APP_BUNDLE)"
 	@echo "Signed: $(APP_BUNDLE)"
 
 # Code sign with Developer ID (for distribution)
-sign-dist: $(APP_BUNDLE)
+sign-dist: build
 	@if [ -z "$(SIGNING_IDENTITY)" ]; then \
 		echo "Error: SIGNING_IDENTITY is required for distribution signing."; \
 		echo "Example: make sign-dist SIGNING_IDENTITY='Developer ID Application: Your Name (TEAM_ID)'"; \
@@ -75,7 +76,7 @@ sign-dist: $(APP_BUNDLE)
 	@echo "Signed: $(APP_BUNDLE)"
 
 # Create DMG for distribution
-dmg: $(APP_BUNDLE)
+dmg: build
 	@echo "Creating DMG: $(DMG_NAME)..."
 	@rm -f "$(DMG_NAME)"
 	@hdiutil create -volname $(DMG_VOLNAME) \
@@ -85,8 +86,9 @@ dmg: $(APP_BUNDLE)
 	@echo "DMG created: $(DMG_NAME)"
 
 # Install to /Applications
-install: $(APP_BUNDLE)
+install: build
 	@echo "Installing $(APP_NAME) to $(INSTALL_PATH)..."
+	@mkdir -p "$(INSTALL_DIR)"
 	@rm -rf "$(INSTALL_PATH)"
 	@cp -R "$(APP_BUNDLE)" "$(INSTALL_PATH)"
 	@echo "Installed: $(INSTALL_PATH)"
