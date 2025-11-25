@@ -29,8 +29,9 @@ struct PRRow<PR: PRRowItem>: View {
                 Spacer()
 
                 HStack(spacing: 4) {
-                    // Show merge button for PRs that are approved and mergeable, and don't have failed status
-                    if pr.reviewStatus == .approved,
+                    // Show merge button for PRs that are approved, mergeable, not in merge queue, and don't have failed status
+                    if pr.mergeQueueEntry == nil,
+                       pr.reviewStatus == .approved,
                        pr.mergeable == true,
                        pr.statusState != .failure,
                        pr.statusState != .error,
@@ -75,6 +76,10 @@ struct PRRow<PR: PRRowItem>: View {
                 PRStatePill(state: pr.state)
                 ReviewStatusPill(status: pr.reviewStatus)
 
+                if let mergeQueueEntry = pr.mergeQueueEntry {
+                    MergeQueuePill(entry: mergeQueueEntry)
+                }
+
                 if let statusState = pr.statusState {
                     StatusStatePill(state: statusState)
                 }
@@ -110,6 +115,7 @@ protocol PRRowItem {
     var reviewStatus: ReviewStatus { get }
     var statusState: StatusState? { get }
     var mergeable: Bool? { get }
+    var mergeQueueEntry: MergeQueueEntryInfo? { get }
 }
 
 extension PRSummary: PRRowItem {}

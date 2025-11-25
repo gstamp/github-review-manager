@@ -135,6 +135,10 @@ class GitHubService {
                       }
                     }
                     mergeable
+                    mergeQueueEntry {
+                      state
+                      position
+                    }
                   }
                 }
               }
@@ -192,6 +196,14 @@ class GitHubService {
                     // Create a stable hash for use as an Int ID
                     let prId = node.id.stableHash()
 
+                    let mergeQueueEntry: MergeQueueEntryInfo? = {
+                        guard let entry = node.mergeQueueEntry,
+                              let state = MergeQueueState(rawValue: entry.state) else {
+                            return nil
+                        }
+                        return MergeQueueEntryInfo(state: state, position: entry.position)
+                    }()
+
                     return PRSummary(
                         id: prId,
                         number: node.number,
@@ -208,7 +220,8 @@ class GitHubService {
                         daysSinceReady: daysSinceReady,
                         statusState: statusState,
                         mergeable: node.mergeable == .mergeable,
-                        graphQLId: node.id
+                        graphQLId: node.id,
+                        mergeQueueEntry: mergeQueueEntry
                     )
                 }
 
@@ -312,6 +325,10 @@ class GitHubService {
                       }
                     }
                     mergeable
+                    mergeQueueEntry {
+                      state
+                      position
+                    }
                   }
                 }
               }
@@ -425,6 +442,14 @@ class GitHubService {
                 // Create a stable hash for use as an Int ID
                 let prId = node.id.stableHash()
 
+                let mergeQueueEntry: MergeQueueEntryInfo? = {
+                    guard let entry = node.mergeQueueEntry,
+                          let state = MergeQueueState(rawValue: entry.state) else {
+                        return nil
+                    }
+                    return MergeQueueEntryInfo(state: state, position: entry.position)
+                }()
+
                 return ReviewRequest(
                     id: prId,
                     number: node.number,
@@ -443,7 +468,8 @@ class GitHubService {
                     reviewCategory: BotCategorizer.categorizeReviewer(node.author?.login),
                     statusState: statusState,
                     graphQLId: node.id,
-                    mergeable: node.mergeable == .mergeable
+                    mergeable: node.mergeable == .mergeable,
+                    mergeQueueEntry: mergeQueueEntry
                 )
             }
 
@@ -1300,6 +1326,7 @@ struct UserOpenPRNode: Decodable {
     let timelineItems: TimelineItems
     let commits: Commits
     let mergeable: MergeableState?
+    let mergeQueueEntry: MergeQueueEntryNode?
 }
 
 enum MergeableState: String, Decodable {
@@ -1317,11 +1344,17 @@ struct ReviewRequestNode: Decodable {
     let createdAt: String
     let updatedAt: String
     let author: Author?
-    let repository: Repository  // Should always be present in GraphQL response
+    let repository: Repository
     let reviews: Reviews
     let timelineItems: ReviewRequestTimelineItems
     let commits: Commits
     let mergeable: MergeableState?
+    let mergeQueueEntry: MergeQueueEntryNode?
+}
+
+struct MergeQueueEntryNode: Decodable {
+    let state: String
+    let position: Int?
 }
 
 struct Author: Decodable {

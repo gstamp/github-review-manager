@@ -15,8 +15,9 @@ struct PRSummary: Codable, Identifiable {
     let readyAt: String?
     let daysSinceReady: Double?
     let statusState: StatusState?
-    let mergeable: Bool? // Whether PR can be merged
-    let graphQLId: String // GitHub GraphQL node ID for mutations
+    let mergeable: Bool?
+    let graphQLId: String
+    let mergeQueueEntry: MergeQueueEntryInfo?
 }
 
 enum StatusState: String, Codable {

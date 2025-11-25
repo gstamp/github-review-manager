@@ -796,7 +796,8 @@ class PRViewModel: ObservableObject {
                 reviewCategory: existingRequest.reviewCategory,
                 statusState: existingRequest.statusState,
                 graphQLId: existingRequest.graphQLId,
-                mergeable: existingRequest.mergeable
+                mergeable: existingRequest.mergeable,
+                mergeQueueEntry: existingRequest.mergeQueueEntry
             )
             reviewRequests[index] = updated
         }
