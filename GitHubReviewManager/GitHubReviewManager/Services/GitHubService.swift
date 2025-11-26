@@ -271,6 +271,7 @@ class GitHubService {
                   title
                   url
                   state
+                  isDraft
                   createdAt
                   updatedAt
                   author {
@@ -369,8 +370,15 @@ class GitHubService {
                 }
             }
 
+            // Filter out draft PRs from humans (bots can still have drafts shown)
+            let filteredNodes = prMap.values.filter { node in
+                let category = BotCategorizer.categorizeReviewer(node.author?.login)
+                // Keep non-draft PRs, or draft PRs from bots
+                return !node.isDraft || category != "human"
+            }
+
             // Process all nodes
-            let reviewRequests = prMap.values.map { node in
+            let reviewRequests = filteredNodes.map { node in
                 // Determine review status
                 var reviewStatus: ReviewStatus = .waiting
                 if let latestReview = node.reviews.nodes.last {
@@ -1341,6 +1349,7 @@ struct ReviewRequestNode: Decodable {
     let title: String
     let url: String
     let state: String
+    let isDraft: Bool
     let createdAt: String
     let updatedAt: String
     let author: Author?
