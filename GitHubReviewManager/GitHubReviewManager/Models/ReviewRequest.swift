@@ -18,7 +18,16 @@ struct ReviewRequest: Codable, Identifiable {
     let reviewCategory: String // PR author category: 'human' or bot name (e.g., 'snyk', 'renovate', 'buildagencygitapitoken')
     let statusState: StatusState?
     let graphQLId: String
-    let mergeable: Bool?
+    let mergeableState: MergeableState?
     let mergeQueueEntry: MergeQueueEntryInfo?
+
+    var mergeable: Bool? {
+        guard let state = mergeableState else { return nil }
+        return state == .mergeable
+    }
+
+    var hasConflicts: Bool {
+        return mergeableState == .conflicting
+    }
 }
 

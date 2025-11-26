@@ -219,7 +219,7 @@ class GitHubService {
                         readyAt: readyAt,
                         daysSinceReady: daysSinceReady,
                         statusState: statusState,
-                        mergeable: node.mergeable == .mergeable,
+                        mergeableState: node.mergeable,
                         graphQLId: node.id,
                         mergeQueueEntry: mergeQueueEntry
                     )
@@ -476,7 +476,7 @@ class GitHubService {
                     reviewCategory: BotCategorizer.categorizeReviewer(node.author?.login),
                     statusState: statusState,
                     graphQLId: node.id,
-                    mergeable: node.mergeable == .mergeable,
+                    mergeableState: node.mergeable,
                     mergeQueueEntry: mergeQueueEntry
                 )
             }
@@ -1337,11 +1337,6 @@ struct UserOpenPRNode: Decodable {
     let mergeQueueEntry: MergeQueueEntryNode?
 }
 
-enum MergeableState: String, Decodable {
-    case mergeable = "MERGEABLE"
-    case conflicting = "CONFLICTING"
-    case unknown = "UNKNOWN"
-}
 
 struct ReviewRequestNode: Decodable {
     let id: String

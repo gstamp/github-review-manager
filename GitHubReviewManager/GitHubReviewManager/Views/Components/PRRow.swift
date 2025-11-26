@@ -80,6 +80,10 @@ struct PRRow<PR: PRRowItem>: View {
                     MergeQueuePill(entry: mergeQueueEntry)
                 }
 
+                if pr.hasConflicts {
+                    ConflictPill()
+                }
+
                 if let statusState = pr.statusState {
                     StatusStatePill(state: statusState)
                 }
@@ -115,6 +119,7 @@ protocol PRRowItem {
     var reviewStatus: ReviewStatus { get }
     var statusState: StatusState? { get }
     var mergeable: Bool? { get }
+    var hasConflicts: Bool { get }
     var mergeQueueEntry: MergeQueueEntryInfo? { get }
 }
 

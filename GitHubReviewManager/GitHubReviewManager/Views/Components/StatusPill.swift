@@ -76,3 +76,9 @@ struct PRStatePill: View {
     }
 }
 
+struct ConflictPill: View {
+    var body: some View {
+        StatusPill(text: "conflicts", color: Color.red)
+    }
+}
+

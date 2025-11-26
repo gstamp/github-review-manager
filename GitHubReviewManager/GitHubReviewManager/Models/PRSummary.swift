@@ -15,9 +15,18 @@ struct PRSummary: Codable, Identifiable {
     let readyAt: String?
     let daysSinceReady: Double?
     let statusState: StatusState?
-    let mergeable: Bool?
+    let mergeableState: MergeableState?
     let graphQLId: String
     let mergeQueueEntry: MergeQueueEntryInfo?
+
+    var mergeable: Bool? {
+        guard let state = mergeableState else { return nil }
+        return state == .mergeable
+    }
+
+    var hasConflicts: Bool {
+        return mergeableState == .conflicting
+    }
 }
 
 enum StatusState: String, Codable {
@@ -25,5 +34,11 @@ enum StatusState: String, Codable {
     case failure
     case pending
     case error
+}
+
+enum MergeableState: String, Codable {
+    case mergeable = "MERGEABLE"
+    case conflicting = "CONFLICTING"
+    case unknown = "UNKNOWN"
 }
 
