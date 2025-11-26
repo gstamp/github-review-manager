@@ -3,10 +3,15 @@ import Foundation
 class AuthService {
     static let shared = AuthService()
 
+    private let keychainService = KeychainService.shared
+
     private init() {}
 
-    /// Attempts to get a GitHub token from `gh auth token` command, falling back to GITHUB_TOKEN env var.
-    /// - Returns: The GitHub token, or nil if neither source is available
+    /// Attempts to get a GitHub token from multiple sources in priority order:
+    /// 1. `gh auth token` command
+    /// 2. GITHUB_TOKEN environment variable
+    /// 3. Keychain (manually saved token)
+    /// - Returns: The GitHub token, or nil if no source is available
     func getGitHubToken() async -> String? {
         // Try gh auth token first
         if let token = try? await getTokenFromGHCLI() {
@@ -22,9 +27,33 @@ class AuthService {
             return envToken
         }
 
-        print("No token available from either source")
-        // Neither source available
+        // Fall back to Keychain
+        if let keychainToken = keychainService.getToken() {
+            print("Got token from Keychain")
+            return keychainToken
+        }
+
+        print("No token available from any source")
         return nil
+    }
+
+    /// Save a user-provided token to the Keychain
+    /// - Parameter token: The token to save
+    /// - Returns: True if successful
+    @discardableResult
+    func saveToken(_ token: String) -> Bool {
+        return keychainService.saveToken(token)
+    }
+
+    /// Clear the stored token from Keychain (sign out)
+    @discardableResult
+    func clearToken() -> Bool {
+        return keychainService.deleteToken()
+    }
+
+    /// Check if there's a token stored in Keychain
+    func hasStoredToken() -> Bool {
+        return keychainService.hasToken()
     }
 
     private func getTokenFromGHCLI() async throws -> String? {

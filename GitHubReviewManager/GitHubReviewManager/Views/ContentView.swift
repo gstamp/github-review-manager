@@ -11,6 +11,7 @@ struct ContentView: View {
     @State private var snoozedRequests: [ReviewRequest] = []
     @State private var dismissedPRs: [PRSummary] = []
     @State private var dismissedRequests: [ReviewRequest] = []
+    @State private var showLoginView = false
 
     enum TabIdentifier: Hashable {
         case myPRs
@@ -41,6 +42,14 @@ struct ContentView: View {
                     }
                     .disabled(viewModel.loading || viewModel.isRefreshing)
                     .hoverCursor(.pointingHand)
+
+                    if viewModel.isAuthenticated {
+                        Button("Sign Out") {
+                            viewModel.signOut()
+                            showLoginView = true
+                        }
+                        .hoverCursor(.pointingHand)
+                    }
 
                     Button("Quit") {
                         NSApplication.shared.terminate(nil)
@@ -213,7 +222,24 @@ struct ContentView: View {
         .onAppear {
             Task {
                 await viewModel.loadData()
+                // Show login if no token available after load attempt
+                if !viewModel.isAuthenticated {
+                    showLoginView = true
+                }
             }
+        }
+        .sheet(isPresented: $showLoginView) {
+            LoginView(
+                onSuccess: {
+                    showLoginView = false
+                    Task {
+                        await viewModel.loadData(forceRefresh: true)
+                    }
+                },
+                onCancel: {
+                    showLoginView = false
+                }
+            )
         }
         .alert("Confirm Merge", isPresented: $viewModel.showMergeConfirmation) {
             Button("Cancel", role: .cancel) {
@@ -313,6 +339,7 @@ class PRViewModel: ObservableObject {
     @Published var mergingPRIds: Set<Int> = []
     @Published var mergeError: String?
     @Published var showMergeError = false
+    @Published var isAuthenticated = false
 
     private var allUserPRs: [PRSummary] = [] // All PRs including snoozed/dismissed
     private var allReviewRequests: [ReviewRequest] = [] // All requests including snoozed/dismissed
@@ -326,6 +353,18 @@ class PRViewModel: ObservableObject {
 
     var myPRsCount: Int {
         userPRs.count
+    }
+
+    func signOut() {
+        authService.clearToken()
+        githubService.setToken(nil)
+        isAuthenticated = false
+        userPRs = []
+        reviewRequests = []
+        allUserPRs = []
+        allReviewRequests = []
+        refreshTimer?.invalidate()
+        refreshTimer = nil
     }
 
     func getSnoozedCount(for prs: [PRSummary]) -> Int {
@@ -426,9 +465,13 @@ class PRViewModel: ObservableObject {
             if let token = await authService.getGitHubToken() {
                 print("Got token from auth service")
                 githubService.setToken(token)
+                isAuthenticated = true
+            } else {
+                isAuthenticated = false
             }
         } else {
             print("Token already available")
+            isAuthenticated = true
         }
 
         print("Loading data (forceRefresh: \(forceRefresh))...")
