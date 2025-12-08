@@ -5,6 +5,12 @@ struct FilterButton: View {
     let isActive: Bool
     let action: () -> Void
 
+    @State private var isHovering = false
+    @State private var showTooltip = false
+    @State private var hoverTask: Task<Void, Never>?
+
+    private let tooltipDelay: UInt64 = 300_000_000 // 300ms in nanoseconds
+
     private var iconName: String {
         switch filterType {
         case .failed:
@@ -54,7 +60,27 @@ struct FilterButton: View {
         }
         .buttonStyle(PlainButtonStyle())
         .hoverCursor(.pointingHand)
-        .help(filterType.displayName)
+        .onHover { hovering in
+            isHovering = hovering
+            if hovering {
+                hoverTask = Task {
+                    try? await Task.sleep(nanoseconds: tooltipDelay)
+                    if !Task.isCancelled && isHovering {
+                        showTooltip = true
+                    }
+                }
+            } else {
+                hoverTask?.cancel()
+                hoverTask = nil
+                showTooltip = false
+            }
+        }
+        .popover(isPresented: $showTooltip, arrowEdge: .bottom) {
+            Text(filterType.displayName)
+                .font(.caption)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+        }
     }
 }
 
