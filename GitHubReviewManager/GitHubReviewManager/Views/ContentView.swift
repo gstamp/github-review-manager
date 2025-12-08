@@ -12,10 +12,43 @@ struct ContentView: View {
     @State private var dismissedPRs: [PRSummary] = []
     @State private var dismissedRequests: [ReviewRequest] = []
     @State private var showLoginView = false
+    @State private var filterStates: [String: PRFilterState] = [:]
+
+    private let storageService = StorageService.shared
 
     enum TabIdentifier: Hashable {
         case myPRs
         case category(String)
+
+        var storageKey: String {
+            switch self {
+            case .myPRs:
+                return "myPRs"
+            case .category(let category):
+                return "category_\(category)"
+            }
+        }
+    }
+
+    private func filterStateBinding(for tabId: String) -> Binding<PRFilterState> {
+        Binding(
+            get: { filterStates[tabId] ?? PRFilterState() },
+            set: { filterStates[tabId] = $0 }
+        )
+    }
+
+    private func saveFilterState(for tabId: String) {
+        if let state = filterStates[tabId] {
+            storageService.saveFilterState(state, for: tabId)
+        }
+    }
+
+    private func loadAllFilterStates() {
+        filterStates["myPRs"] = storageService.loadFilterState(for: "myPRs")
+        for group in viewModel.sortedCategoryGroups {
+            let key = "category_\(group.category)"
+            filterStates[key] = storageService.loadFilterState(for: key)
+        }
     }
 
     var body: some View {
@@ -133,7 +166,9 @@ struct ContentView: View {
                                 }
                             }
                         },
-                        mergingPRIds: viewModel.mergingPRIds
+                        mergingPRIds: viewModel.mergingPRIds,
+                        filterState: filterStateBinding(for: "myPRs"),
+                        onFilterChanged: { saveFilterState(for: "myPRs") }
                     )
                     .tabItem {
                         Text("My PRs (\(viewModel.myPRsCount))")
@@ -142,6 +177,7 @@ struct ContentView: View {
 
                     // Category Tabs
                     ForEach(viewModel.sortedCategoryGroups, id: \.category) { group in
+                        let tabKey = "category_\(group.category)"
                         PRListView(
                             prs: group.requests,
                             emptyMessage: "No review requests found",
@@ -208,7 +244,9 @@ struct ContentView: View {
                                     }
                                 }
                             },
-                            mergingPRIds: viewModel.mergingPRIds
+                            mergingPRIds: viewModel.mergingPRIds,
+                            filterState: filterStateBinding(for: tabKey),
+                            onFilterChanged: { saveFilterState(for: tabKey) }
                         )
                         .tabItem {
                             Text("\(group.categoryLabel) (\(group.requests.count))")
@@ -222,6 +260,7 @@ struct ContentView: View {
         .onAppear {
             Task {
                 await viewModel.loadData()
+                loadAllFilterStates()
                 // Show login if no token available after load attempt
                 if !viewModel.isAuthenticated {
                     showLoginView = true

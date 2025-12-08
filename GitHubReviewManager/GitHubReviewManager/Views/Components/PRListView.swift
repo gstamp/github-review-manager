@@ -16,6 +16,8 @@ struct PRListView<PR: PRRowItem & Identifiable>: View {
     let onShowSnoozed: (() -> Void)?
     let onShowDismissed: (() -> Void)?
     let mergingPRIds: Set<Int>
+    @Binding var filterState: PRFilterState
+    let onFilterChanged: () -> Void
 
     init(
         prs: [PR],
@@ -31,7 +33,9 @@ struct PRListView<PR: PRRowItem & Identifiable>: View {
         dismissedCount: Int = 0,
         onShowSnoozed: (() -> Void)? = nil,
         onShowDismissed: (() -> Void)? = nil,
-        mergingPRIds: Set<Int> = []
+        mergingPRIds: Set<Int> = [],
+        filterState: Binding<PRFilterState>,
+        onFilterChanged: @escaping () -> Void
     ) {
         self.prs = prs
         self.emptyMessage = emptyMessage
@@ -47,28 +51,44 @@ struct PRListView<PR: PRRowItem & Identifiable>: View {
         self.onShowSnoozed = onShowSnoozed
         self.onShowDismissed = onShowDismissed
         self.mergingPRIds = mergingPRIds
+        self._filterState = filterState
+        self.onFilterChanged = onFilterChanged
+    }
+
+    private var filteredPRs: [PR] {
+        filterState.filter(prs)
     }
 
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    if prs.isEmpty {
-                        Text(emptyMessage)
-                            .foregroundColor(.secondary)
-                            .padding()
-                    } else {
-                        if showCopyAll, let copyAll = onCopyAll {
-                            HStack {
-                                Spacer()
-                                CopyAllButton {
-                                    copyAll()
-                                }
-                            }
-                            .padding(.horizontal)
-                        }
+                    // Header row with filters and copy all
+                    HStack {
+                        FilterBar(filterState: $filterState, onFilterChanged: onFilterChanged)
 
-                        ForEach(prs) { pr in
+                        Spacer()
+
+                        if showCopyAll, let copyAll = onCopyAll {
+                            CopyAllButton {
+                                copyAll()
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+
+                    if filteredPRs.isEmpty {
+                        if prs.isEmpty {
+                            Text(emptyMessage)
+                                .foregroundColor(.secondary)
+                                .padding()
+                        } else {
+                            Text("No PRs match the selected filters")
+                                .foregroundColor(.secondary)
+                                .padding()
+                        }
+                    } else {
+                        ForEach(filteredPRs) { pr in
                             PRRow(
                                 pr: pr,
                                 onCopy: {
@@ -135,4 +155,3 @@ struct PRListView<PR: PRRowItem & Identifiable>: View {
         }
     }
 }
-

@@ -183,5 +183,34 @@ class StorageService {
         dismissedIds.remove(prId)
         saveDismissedPrs(dismissedIds)
     }
+
+    // MARK: - Filter State Persistence
+
+    private func filterKey(for tabId: String) -> String {
+        return "filters_\(tabId)"
+    }
+
+    func loadFilterState(for tabId: String) -> PRFilterState {
+        let key = filterKey(for: tabId)
+        guard let data = userDefaults.data(forKey: key) else {
+            return PRFilterState()
+        }
+
+        do {
+            return try JSONDecoder().decode(PRFilterState.self, from: data)
+        } catch {
+            return PRFilterState()
+        }
+    }
+
+    func saveFilterState(_ state: PRFilterState, for tabId: String) {
+        let key = filterKey(for: tabId)
+        do {
+            let data = try JSONEncoder().encode(state)
+            userDefaults.set(data, forKey: key)
+        } catch {
+            print("Failed to save filter state: \(error)")
+        }
+    }
 }
 
