@@ -35,6 +35,29 @@ struct PRSummary: Codable, Identifiable {
     func withStatus(isSnoozed: Bool, isDismissed: Bool) -> PRSummaryWithStatus {
         PRSummaryWithStatus(pr: self, isSnoozed: isSnoozed, isDismissed: isDismissed)
     }
+
+    func withUpdatedState(_ serverState: SinglePRState) -> PRSummary {
+        PRSummary(
+            id: id,
+            number: number,
+            title: title,
+            url: url,
+            state: serverState.state,
+            reviewStatus: serverState.reviewStatus,
+            author: author,
+            repoOwner: repoOwner,
+            repoName: repoName,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            readyAt: readyAt,
+            daysSinceReady: daysSinceReady,
+            statusState: serverState.statusState,
+            mergeableState: serverState.mergeableState,
+            graphQLId: graphQLId,
+            mergeQueueEntry: serverState.mergeQueueEntry,
+            isDraft: isDraft
+        )
+    }
 }
 
 struct PRSummaryWithStatus: Identifiable {

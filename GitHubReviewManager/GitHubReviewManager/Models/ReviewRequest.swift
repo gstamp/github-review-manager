@@ -37,6 +37,31 @@ struct ReviewRequest: Codable, Identifiable {
     func withStatus(isSnoozed: Bool, isDismissed: Bool) -> ReviewRequestWithStatus {
         ReviewRequestWithStatus(request: self, isSnoozed: isSnoozed, isDismissed: isDismissed)
     }
+
+    func withUpdatedState(_ serverState: SinglePRState) -> ReviewRequest {
+        ReviewRequest(
+            id: id,
+            number: number,
+            title: title,
+            url: url,
+            state: serverState.state,
+            reviewStatus: serverState.reviewStatus,
+            author: author,
+            repoOwner: repoOwner,
+            repoName: repoName,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            reviewRequestedAt: reviewRequestedAt,
+            daysWaiting: daysWaiting,
+            requestedReviewer: requestedReviewer,
+            reviewCategory: reviewCategory,
+            statusState: serverState.statusState,
+            graphQLId: graphQLId,
+            mergeableState: serverState.mergeableState,
+            mergeQueueEntry: serverState.mergeQueueEntry,
+            isDraft: isDraft
+        )
+    }
 }
 
 struct ReviewRequestWithStatus: Identifiable {

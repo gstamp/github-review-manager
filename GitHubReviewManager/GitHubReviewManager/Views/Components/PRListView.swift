@@ -14,6 +14,7 @@ struct PRListView<PR: PRRowItem & Identifiable>: View {
     let snoozedCount: Int
     let dismissedCount: Int
     let mergingPRIds: Set<Int>
+    let pendingActions: Set<Int>
     @Binding var filterState: PRFilterState
     let onFilterChanged: () -> Void
     let showDraftsToggle: Bool
@@ -33,6 +34,7 @@ struct PRListView<PR: PRRowItem & Identifiable>: View {
         snoozedCount: Int = 0,
         dismissedCount: Int = 0,
         mergingPRIds: Set<Int> = [],
+        pendingActions: Set<Int> = [],
         filterState: Binding<PRFilterState>,
         onFilterChanged: @escaping () -> Void,
         showDraftsToggle: Bool = false,
@@ -51,6 +53,7 @@ struct PRListView<PR: PRRowItem & Identifiable>: View {
         self.snoozedCount = snoozedCount
         self.dismissedCount = dismissedCount
         self.mergingPRIds = mergingPRIds
+        self.pendingActions = pendingActions
         self._filterState = filterState
         self.onFilterChanged = onFilterChanged
         self.showDraftsToggle = showDraftsToggle
@@ -121,6 +124,7 @@ struct PRListView<PR: PRRowItem & Identifiable>: View {
                                 }
                             },
                             isMerging: mergingPRIds.contains(pr.id),
+                            isPending: pendingActions.contains(pr.id),
                             onUnsnooze: onUnsnooze.map { unsnooze in
                                 {
                                     unsnooze(pr)

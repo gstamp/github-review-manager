@@ -554,6 +554,106 @@ class GitHubService {
         cachedReviewRequests = nil
     }
 
+    // MARK: - Single PR State Query
+
+    /// Fetch current state of a single PR by GraphQL ID
+    /// Returns nil if PR no longer exists or is not accessible
+    func getPRState(graphQLId: String) async throws -> SinglePRState? {
+        guard token != nil else {
+            throw GitHubError.notAuthenticated
+        }
+
+        let query = """
+        query($id: ID!) {
+          node(id: $id) {
+            ... on PullRequest {
+              state
+              merged
+              reviewDecision
+              mergeQueueEntry {
+                state
+                position
+              }
+              mergeable
+              commits(last: 1) {
+                nodes {
+                  commit {
+                    statusCheckRollup {
+                      state
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+
+        let variables: [String: Any] = ["id": graphQLId]
+
+        struct SinglePRStateResponse: Decodable {
+            let node: SinglePRNode?
+        }
+
+        struct SinglePRNode: Decodable {
+            let state: String
+            let merged: Bool
+            let reviewDecision: String?
+            let mergeQueueEntry: MergeQueueEntryNode?
+            let mergeable: MergeableState?
+            let commits: Commits
+        }
+
+        let response: GraphQLResponse<SinglePRStateResponse> = try await executeGraphQL(
+            query: query,
+            variables: variables
+        )
+
+        guard let node = response.data.node else {
+            return nil
+        }
+
+        let mergeQueueEntry: MergeQueueEntryInfo? = {
+            guard let entry = node.mergeQueueEntry,
+                  let state = MergeQueueState(rawValue: entry.state) else {
+                return nil
+            }
+            return MergeQueueEntryInfo(state: state, position: entry.position)
+        }()
+
+        let statusState: StatusState? = {
+            guard let state = node.commits.nodes.first?.commit.statusCheckRollup?.state else {
+                return nil
+            }
+            return StatusState(rawValue: state.lowercased())
+        }()
+
+        let reviewStatus: ReviewStatus = {
+            guard let decision = node.reviewDecision else {
+                return .waiting
+            }
+            switch decision {
+            case "APPROVED":
+                return .approved
+            case "CHANGES_REQUESTED":
+                return .changesRequested
+            case "REVIEW_REQUIRED":
+                return .waiting
+            default:
+                return .waiting
+            }
+        }()
+
+        return SinglePRState(
+            state: PRState(rawValue: node.state.lowercased()) ?? .open,
+            merged: node.merged,
+            reviewStatus: reviewStatus,
+            mergeQueueEntry: mergeQueueEntry,
+            mergeableState: node.mergeable,
+            statusState: statusState
+        )
+    }
+
     // MARK: - Review Detection
 
     /// Detect new human reviews that haven't been seen before
@@ -1278,6 +1378,15 @@ struct NewReviewRequest {
     let prNumber: Int
     let prTitle: String
     let reviewCategory: String
+}
+
+struct SinglePRState {
+    let state: PRState
+    let merged: Bool
+    let reviewStatus: ReviewStatus
+    let mergeQueueEntry: MergeQueueEntryInfo?
+    let mergeableState: MergeableState?
+    let statusState: StatusState?
 }
 
 struct ReviewDetectionPRNode: Decodable {

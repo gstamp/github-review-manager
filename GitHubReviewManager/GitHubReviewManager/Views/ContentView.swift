@@ -132,6 +132,7 @@ struct ContentView: View {
                         snoozedCount: viewModel.getSnoozedCount(for: viewModel.userPRs),
                         dismissedCount: viewModel.getDismissedCount(for: viewModel.userPRs),
                         mergingPRIds: viewModel.mergingPRIds,
+                        pendingActions: viewModel.pendingActions,
                         filterState: filterStateBinding(for: "myPRs"),
                         onFilterChanged: { saveFilterState(for: "myPRs") },
                         showDraftsToggle: true,
@@ -187,6 +188,7 @@ struct ContentView: View {
                             snoozedCount: viewModel.getSnoozedCount(for: group.requests, category: group.category),
                             dismissedCount: viewModel.getDismissedCount(for: group.requests, category: group.category),
                             mergingPRIds: viewModel.mergingPRIds,
+                            pendingActions: viewModel.pendingActions,
                             filterState: filterStateBinding(for: tabKey),
                             onFilterChanged: { saveFilterState(for: tabKey) },
                             onUnsnooze: { request in
@@ -291,6 +293,7 @@ class PRViewModel: ObservableObject {
     @Published var mergeError: String?
     @Published var showMergeError = false
     @Published var isAuthenticated = false
+    @Published var pendingActions: Set<Int> = []
 
     private var allUserPRs: [PRSummary] = [] // All PRs including snoozed/dismissed
     private var allReviewRequests: [ReviewRequest] = [] // All requests including snoozed/dismissed
@@ -581,42 +584,42 @@ class PRViewModel: ObservableObject {
     }
 
     func approvePR(_ reviewRequest: ReviewRequest) async {
-        // Optimistically update local state
-        updateReviewRequestStatus(reviewRequest.id, newStatus: .approved)
+        pendingActions.insert(reviewRequest.id)
+        defer { pendingActions.remove(reviewRequest.id) }
 
         do {
             print("Attempting to approve PR #\(reviewRequest.number) (\(reviewRequest.repoOwner)/\(reviewRequest.repoName))")
             print("Using GraphQL ID: \(reviewRequest.graphQLId)")
             try await githubService.approvePR(pullRequestId: reviewRequest.graphQLId)
             print("Successfully approved PR #\(reviewRequest.number)")
-            // Invalidate cache but don't reload - we've already updated locally
+
+            // Verify with single-PR query (lightweight)
+            if let newState = try await githubService.getPRState(graphQLId: reviewRequest.graphQLId) {
+                updateLocalReviewRequestState(reviewRequest.id, with: newState)
+            } else {
+                removePRFromLocalState(reviewRequest.id)
+            }
             githubService.invalidateCache()
         } catch {
-            // Revert optimistic update on error
-            updateReviewRequestStatus(reviewRequest.id, newStatus: reviewRequest.reviewStatus)
-            // Log error details for debugging
             print("Error approving PR #\(reviewRequest.number) (\(reviewRequest.repoOwner)/\(reviewRequest.repoName)): \(error)")
             if let githubError = error as? GitHubError {
                 print("GitHub error details: \(githubError.localizedDescription)")
             }
-            // Refresh to get accurate state on error
-            await loadData(forceRefresh: true)
         }
     }
 
     func mergePR(_ pr: PRSummary) async {
         let prId = pr.id
 
-        // Mark PR as merging
         mergingPRIds.insert(prId)
+        pendingActions.insert(prId)
 
         defer {
-            // Always remove from merging set when done
             mergingPRIds.remove(prId)
+            pendingActions.remove(prId)
         }
 
         do {
-            // Get repository merge method (cached, so minimal API calls)
             let mergeMethod = try await githubService.getRepositoryMergeMethod(
                 owner: pr.repoOwner,
                 repo: pr.repoName
@@ -629,23 +632,27 @@ class PRViewModel: ObservableObject {
             )
             print("Successfully merged PR #\(pr.number)")
 
-            // Remove PR from list only after successful merge confirmation
-            userPRs.removeAll { $0.id == prId }
-
-            // Invalidate cache and refresh to ensure we have accurate state
+            // Verify with single-PR query - if merged, remove from list
+            if let newState = try? await githubService.getPRState(graphQLId: pr.graphQLId) {
+                if newState.merged || newState.state == .merged || newState.state == .closed {
+                    removePRFromLocalState(prId)
+                } else {
+                    updateLocalUserPRState(prId, with: newState)
+                }
+            } else {
+                removePRFromLocalState(prId)
+            }
             githubService.invalidateCache()
-            await loadData(forceRefresh: true)
         } catch GitHubError.mergeQueued {
-            // PR was successfully enqueued to merge queue
             print("PR #\(pr.number) successfully enqueued to merge queue")
-            // Don't remove PR from list - it's queued but not merged yet
-            // Refresh to show updated status
+            // Verify queue position with single-PR query
+            if let newState = try? await githubService.getPRState(graphQLId: pr.graphQLId) {
+                updateLocalUserPRState(prId, with: newState)
+            }
             githubService.invalidateCache()
-            await loadData(forceRefresh: true)
         } catch {
             print("Error merging PR #\(pr.number) (\(pr.repoOwner)/\(pr.repoName)): \(error)")
 
-            // Show error alert to user
             let errorMessage: String = {
                 if let githubError = error as? GitHubError {
                     return githubError.localizedDescription
@@ -654,7 +661,6 @@ class PRViewModel: ObservableObject {
                 }
             }()
 
-            // Format error message with PR details
             let fullErrorMessage = "Failed to merge PR #\(pr.number): \(pr.title)\n\n\(errorMessage)"
             mergeError = fullErrorMessage
             showMergeError = true
@@ -698,16 +704,15 @@ class PRViewModel: ObservableObject {
     func mergePR(_ reviewRequest: ReviewRequest) async {
         let prId = reviewRequest.id
 
-        // Mark PR as merging
         mergingPRIds.insert(prId)
+        pendingActions.insert(prId)
 
         defer {
-            // Always remove from merging set when done
             mergingPRIds.remove(prId)
+            pendingActions.remove(prId)
         }
 
         do {
-            // Get repository merge method (cached, so minimal API calls)
             let mergeMethod = try await githubService.getRepositoryMergeMethod(
                 owner: reviewRequest.repoOwner,
                 repo: reviewRequest.repoName
@@ -720,23 +725,27 @@ class PRViewModel: ObservableObject {
             )
             print("Successfully merged PR #\(reviewRequest.number)")
 
-            // Remove PR from list only after successful merge confirmation
-            reviewRequests.removeAll { $0.id == prId }
-
-            // Invalidate cache and refresh to ensure we have accurate state
+            // Verify with single-PR query - if merged, remove from list
+            if let newState = try? await githubService.getPRState(graphQLId: reviewRequest.graphQLId) {
+                if newState.merged || newState.state == .merged || newState.state == .closed {
+                    removePRFromLocalState(prId)
+                } else {
+                    updateLocalReviewRequestState(prId, with: newState)
+                }
+            } else {
+                removePRFromLocalState(prId)
+            }
             githubService.invalidateCache()
-            await loadData(forceRefresh: true)
         } catch GitHubError.mergeQueued {
-            // PR was successfully enqueued to merge queue
             print("PR #\(reviewRequest.number) successfully enqueued to merge queue")
-            // Don't remove PR from list - it's queued but not merged yet
-            // Refresh to show updated status
+            // Verify queue position with single-PR query
+            if let newState = try? await githubService.getPRState(graphQLId: reviewRequest.graphQLId) {
+                updateLocalReviewRequestState(prId, with: newState)
+            }
             githubService.invalidateCache()
-            await loadData(forceRefresh: true)
         } catch {
             print("Error merging PR #\(reviewRequest.number) (\(reviewRequest.repoOwner)/\(reviewRequest.repoName)): \(error)")
 
-            // Show error alert to user
             let errorMessage: String = {
                 if let githubError = error as? GitHubError {
                     return githubError.localizedDescription
@@ -745,7 +754,6 @@ class PRViewModel: ObservableObject {
                 }
             }()
 
-            // Format error message with PR details
             let fullErrorMessage = "Failed to merge PR #\(reviewRequest.number): \(reviewRequest.title)\n\n\(errorMessage)"
             mergeError = fullErrorMessage
             showMergeError = true
@@ -757,47 +765,31 @@ class PRViewModel: ObservableObject {
         showMergeError = false
     }
 
-    // MARK: - Local State Updates
+    // MARK: - Surgical Local State Updates
 
-    /// Update review status for a review request locally (optimistic update)
-    private func updateReviewRequestStatus(_ prId: Int, newStatus: ReviewStatus) {
-        // Update in reviewRequests (filtered list)
+    private func updateLocalReviewRequestState(_ prId: Int, with serverState: SinglePRState) {
         if let index = reviewRequests.firstIndex(where: { $0.id == prId }) {
-            let existingRequest = reviewRequests[index]
-            let updated = createUpdatedRequest(existingRequest, newStatus: newStatus)
-            reviewRequests[index] = updated
+            reviewRequests[index] = reviewRequests[index].withUpdatedState(serverState)
         }
-        // Also update in allReviewRequests (full list used for display)
         if let index = allReviewRequests.firstIndex(where: { $0.id == prId }) {
-            let existingRequest = allReviewRequests[index]
-            let updated = createUpdatedRequest(existingRequest, newStatus: newStatus)
-            allReviewRequests[index] = updated
+            allReviewRequests[index] = allReviewRequests[index].withUpdatedState(serverState)
         }
     }
 
-    private func createUpdatedRequest(_ existingRequest: ReviewRequest, newStatus: ReviewStatus) -> ReviewRequest {
-        ReviewRequest(
-            id: existingRequest.id,
-            number: existingRequest.number,
-            title: existingRequest.title,
-            url: existingRequest.url,
-            state: existingRequest.state,
-            reviewStatus: newStatus,
-            author: existingRequest.author,
-            repoOwner: existingRequest.repoOwner,
-            repoName: existingRequest.repoName,
-            createdAt: existingRequest.createdAt,
-            updatedAt: existingRequest.updatedAt,
-            reviewRequestedAt: existingRequest.reviewRequestedAt,
-            daysWaiting: existingRequest.daysWaiting,
-            requestedReviewer: existingRequest.requestedReviewer,
-            reviewCategory: existingRequest.reviewCategory,
-            statusState: existingRequest.statusState,
-            graphQLId: existingRequest.graphQLId,
-            mergeableState: existingRequest.mergeableState,
-            mergeQueueEntry: existingRequest.mergeQueueEntry,
-            isDraft: existingRequest.isDraft
-        )
+    private func updateLocalUserPRState(_ prId: Int, with serverState: SinglePRState) {
+        if let index = userPRs.firstIndex(where: { $0.id == prId }) {
+            userPRs[index] = userPRs[index].withUpdatedState(serverState)
+        }
+        if let index = allUserPRs.firstIndex(where: { $0.id == prId }) {
+            allUserPRs[index] = allUserPRs[index].withUpdatedState(serverState)
+        }
+    }
+
+    private func removePRFromLocalState(_ prId: Int) {
+        userPRs.removeAll { $0.id == prId }
+        allUserPRs.removeAll { $0.id == prId }
+        reviewRequests.removeAll { $0.id == prId }
+        allReviewRequests.removeAll { $0.id == prId }
     }
 }
 
