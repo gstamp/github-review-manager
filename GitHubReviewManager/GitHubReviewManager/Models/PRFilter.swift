@@ -30,13 +30,19 @@ enum PRFilterType: String, Codable, CaseIterable {
 
 struct PRFilterState: Codable, Equatable {
     var activeFilters: Set<PRFilterType>
+    var showDrafts: Bool
+    var showSnoozed: Bool
+    var showDismissed: Bool
 
-    init(activeFilters: Set<PRFilterType> = []) {
+    init(activeFilters: Set<PRFilterType> = [], showDrafts: Bool = false, showSnoozed: Bool = false, showDismissed: Bool = false) {
         self.activeFilters = activeFilters
+        self.showDrafts = showDrafts
+        self.showSnoozed = showSnoozed
+        self.showDismissed = showDismissed
     }
 
     var isEmpty: Bool {
-        activeFilters.isEmpty
+        activeFilters.isEmpty && !showDrafts && !showSnoozed && !showDismissed
     }
 
     mutating func toggle(_ filter: PRFilterType) {
@@ -56,7 +62,22 @@ struct PRFilterState: Codable, Equatable {
     }
 
     func matches<PR: PRRowItem>(_ pr: PR) -> Bool {
-        // If no filters active, show everything
+        // Filter out draft PRs unless showDrafts is enabled
+        if pr.isDraft && !showDrafts {
+            return false
+        }
+
+        // Filter out snoozed PRs unless showSnoozed is enabled
+        if pr.isSnoozed && !showSnoozed {
+            return false
+        }
+
+        // Filter out dismissed PRs unless showDismissed is enabled
+        if pr.isDismissed && !showDismissed {
+            return false
+        }
+
+        // If no active filters, show everything (that passes above filters)
         if activeFilters.isEmpty {
             return true
         }

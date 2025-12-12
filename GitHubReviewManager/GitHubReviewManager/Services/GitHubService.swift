@@ -156,7 +156,6 @@ class GitHubService {
             )
 
             let prs = response.data.search.nodes
-                .filter { !$0.isDraft } // Skip draft PRs
                 .map { node in
                     // Determine review status
                     var reviewStatus: ReviewStatus = .waiting
@@ -221,7 +220,8 @@ class GitHubService {
                         statusState: statusState,
                         mergeableState: node.mergeable,
                         graphQLId: node.id,
-                        mergeQueueEntry: mergeQueueEntry
+                        mergeQueueEntry: mergeQueueEntry,
+                        isDraft: node.isDraft
                     )
                 }
 
@@ -477,7 +477,8 @@ class GitHubService {
                     statusState: statusState,
                     graphQLId: node.id,
                     mergeableState: node.mergeable,
-                    mergeQueueEntry: mergeQueueEntry
+                    mergeQueueEntry: mergeQueueEntry,
+                    isDraft: node.isDraft
                 )
             }
 
@@ -791,6 +792,11 @@ class GitHubService {
 
             // Categorize by PR author (not reviewer) for grouping
             let reviewCategory = BotCategorizer.categorizeReviewer(node.author?.login)
+
+            // Only notify for human PRs (skip bot PRs)
+            guard reviewCategory == "human" else {
+                continue
+            }
 
             newReviewRequests.append(NewReviewRequest(
                 prId: prId,

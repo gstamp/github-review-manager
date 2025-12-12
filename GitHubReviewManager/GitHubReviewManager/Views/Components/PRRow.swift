@@ -9,6 +9,8 @@ struct PRRow<PR: PRRowItem>: View {
     let onApprove: (() -> Void)?
     let onMerge: (() -> Void)?
     let isMerging: Bool
+    let onUnsnooze: (() -> Void)?
+    let onUndismiss: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -29,6 +31,36 @@ struct PRRow<PR: PRRowItem>: View {
                 Spacer()
 
                 HStack(spacing: 4) {
+                    // Show restore button for snoozed items
+                    if pr.isSnoozed, let unsnoozeAction = onUnsnooze {
+                        Button(action: unsnoozeAction) {
+                            Text("Restore")
+                                .font(.caption)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.orange.opacity(0.2))
+                                .foregroundColor(.orange)
+                                .cornerRadius(4)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .hoverCursor(.pointingHand)
+                    }
+
+                    // Show restore button for dismissed items
+                    if pr.isDismissed, let undismissAction = onUndismiss {
+                        Button(action: undismissAction) {
+                            Text("Restore")
+                                .font(.caption)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.gray.opacity(0.2))
+                                .foregroundColor(.primary)
+                                .cornerRadius(4)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .hoverCursor(.pointingHand)
+                    }
+
                     // Show merge button for PRs that are approved, mergeable, not in merge queue, and don't have failed status
                     if pr.mergeQueueEntry == nil,
                        pr.reviewStatus == .approved,
@@ -40,9 +72,9 @@ struct PRRow<PR: PRRowItem>: View {
                     }
 
                     // Show approve button for ReviewRequests that haven't been approved and don't have failing builds
-                    if let reviewRequest = pr as? ReviewRequest,
-                       reviewRequest.reviewStatus != .approved,
-                       reviewRequest.statusState != .failure,
+                    if (pr is ReviewRequest || pr is ReviewRequestWithStatus),
+                       pr.reviewStatus != .approved,
+                       pr.statusState != .failure,
                        let approveAction = onApprove {
                         ApproveButton(action: approveAction)
                     }
@@ -58,7 +90,6 @@ struct PRRow<PR: PRRowItem>: View {
                     }
                     .buttonStyle(PlainButtonStyle())
                     .hoverCursor(.pointingHand)
-                    .help("Dismiss")
                 }
             }
 
@@ -67,10 +98,22 @@ struct PRRow<PR: PRRowItem>: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
 
-                if let author = (pr as? ReviewRequest)?.author {
+                if let author = (pr as? ReviewRequest)?.author ?? (pr as? ReviewRequestWithStatus)?.author {
                     Text("by \(author)")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                }
+
+                if pr.isDraft {
+                    DraftPill()
+                }
+
+                if pr.isSnoozed {
+                    SnoozedPill()
+                }
+
+                if pr.isDismissed {
+                    DismissedPill()
                 }
 
                 PRStatePill(state: pr.state)
@@ -88,13 +131,13 @@ struct PRRow<PR: PRRowItem>: View {
                     StatusStatePill(state: statusState)
                 }
 
-                if let daysSinceReady = (pr as? PRSummary)?.daysSinceReady {
+                if let daysSinceReady = (pr as? PRSummary)?.daysSinceReady ?? (pr as? PRSummaryWithStatus)?.daysSinceReady {
                     Text("Ready for \(String(format: "%.1f", daysSinceReady)) days")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
 
-                if let daysWaiting = (pr as? ReviewRequest)?.daysWaiting {
+                if let daysWaiting = (pr as? ReviewRequest)?.daysWaiting ?? (pr as? ReviewRequestWithStatus)?.daysWaiting {
                     Text("Waiting \(String(format: "%.1f", daysWaiting)) days")
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -121,8 +164,13 @@ protocol PRRowItem {
     var mergeable: Bool? { get }
     var hasConflicts: Bool { get }
     var mergeQueueEntry: MergeQueueEntryInfo? { get }
+    var isDraft: Bool { get }
+    var isSnoozed: Bool { get }
+    var isDismissed: Bool { get }
 }
 
 extension PRSummary: PRRowItem {}
+extension PRSummaryWithStatus: PRRowItem {}
 extension ReviewRequest: PRRowItem {}
+extension ReviewRequestWithStatus: PRRowItem {}
 

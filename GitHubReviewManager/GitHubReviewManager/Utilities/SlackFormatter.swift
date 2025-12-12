@@ -38,5 +38,7 @@ protocol PRItem {
 }
 
 extension PRSummary: PRItem {}
+extension PRSummaryWithStatus: PRItem {}
 extension ReviewRequest: PRItem {}
+extension ReviewRequestWithStatus: PRItem {}
 

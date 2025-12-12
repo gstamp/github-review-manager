@@ -82,3 +82,21 @@ struct ConflictPill: View {
     }
 }
 
+struct DraftPill: View {
+    var body: some View {
+        StatusPill(text: "draft", color: Color.gray)
+    }
+}
+
+struct SnoozedPill: View {
+    var body: some View {
+        StatusPill(text: "snoozed", color: Color.orange)
+    }
+}
+
+struct DismissedPill: View {
+    var body: some View {
+        StatusPill(text: "dismissed", color: Color.gray)
+    }
+}
+

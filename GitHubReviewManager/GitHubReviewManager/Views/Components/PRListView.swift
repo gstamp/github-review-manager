@@ -13,11 +13,12 @@ struct PRListView<PR: PRRowItem & Identifiable>: View {
     let onCopyAll: (() -> Void)?
     let snoozedCount: Int
     let dismissedCount: Int
-    let onShowSnoozed: (() -> Void)?
-    let onShowDismissed: (() -> Void)?
     let mergingPRIds: Set<Int>
     @Binding var filterState: PRFilterState
     let onFilterChanged: () -> Void
+    let showDraftsToggle: Bool
+    let onUnsnooze: ((PR) -> Void)?
+    let onUndismiss: ((PR) -> Void)?
 
     init(
         prs: [PR],
@@ -31,11 +32,12 @@ struct PRListView<PR: PRRowItem & Identifiable>: View {
         onCopyAll: (() -> Void)? = nil,
         snoozedCount: Int = 0,
         dismissedCount: Int = 0,
-        onShowSnoozed: (() -> Void)? = nil,
-        onShowDismissed: (() -> Void)? = nil,
         mergingPRIds: Set<Int> = [],
         filterState: Binding<PRFilterState>,
-        onFilterChanged: @escaping () -> Void
+        onFilterChanged: @escaping () -> Void,
+        showDraftsToggle: Bool = false,
+        onUnsnooze: ((PR) -> Void)? = nil,
+        onUndismiss: ((PR) -> Void)? = nil
     ) {
         self.prs = prs
         self.emptyMessage = emptyMessage
@@ -48,11 +50,12 @@ struct PRListView<PR: PRRowItem & Identifiable>: View {
         self.onCopyAll = onCopyAll
         self.snoozedCount = snoozedCount
         self.dismissedCount = dismissedCount
-        self.onShowSnoozed = onShowSnoozed
-        self.onShowDismissed = onShowDismissed
         self.mergingPRIds = mergingPRIds
         self._filterState = filterState
         self.onFilterChanged = onFilterChanged
+        self.showDraftsToggle = showDraftsToggle
+        self.onUnsnooze = onUnsnooze
+        self.onUndismiss = onUndismiss
     }
 
     private var filteredPRs: [PR] {
@@ -60,98 +63,80 @@ struct PRListView<PR: PRRowItem & Identifiable>: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    // Header row with filters and copy all
-                    HStack {
-                        FilterBar(filterState: $filterState, onFilterChanged: onFilterChanged)
-
-                        Spacer()
-
-                        if showCopyAll, let copyAll = onCopyAll {
-                            CopyAllButton {
-                                copyAll()
-                            }
-                        }
-                    }
-                    .padding(.horizontal)
-
-                    if filteredPRs.isEmpty {
-                        if prs.isEmpty {
-                            Text(emptyMessage)
-                                .foregroundColor(.secondary)
-                                .padding()
-                        } else {
-                            Text("No PRs match the selected filters")
-                                .foregroundColor(.secondary)
-                                .padding()
-                        }
-                    } else {
-                        ForEach(filteredPRs) { pr in
-                            PRRow(
-                                pr: pr,
-                                onCopy: {
-                                    onCopy(pr)
-                                },
-                                onDismiss: {
-                                    onDismiss(pr)
-                                },
-                                onSnooze: onSnooze.map { snooze in
-                                    {
-                                        snooze(pr)
-                                    }
-                                },
-                                onApprove: onApprove.map { approve in
-                                    {
-                                        approve(pr)
-                                    }
-                                },
-                                onMerge: onMerge.map { merge in
-                                    {
-                                        merge(pr)
-                                    }
-                                },
-                                isMerging: mergingPRIds.contains(pr.id)
-                            )
-                            .padding(.horizontal)
-                        }
-                    }
-                }
-                .padding(.vertical)
-            }
-
-            // Bottom label for snoozed/dismissed counts
-            if snoozedCount > 0 || dismissedCount > 0 {
-                Divider()
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                // Header row with filters and copy all
                 HStack {
-                    Spacer()
-                    HStack(spacing: 12) {
-                        if snoozedCount > 0, let onShowSnoozed = onShowSnoozed {
-                            Button(action: onShowSnoozed) {
-                                Text("\(snoozedCount) snoozed")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                            .hoverCursor(.pointingHand)
-                        }
+                    FilterBar(
+                        filterState: $filterState,
+                        onFilterChanged: onFilterChanged,
+                        showDraftsToggle: showDraftsToggle,
+                        snoozedCount: snoozedCount,
+                        dismissedCount: dismissedCount
+                    )
 
-                        if dismissedCount > 0, let onShowDismissed = onShowDismissed {
-                            Button(action: onShowDismissed) {
-                                Text("\(dismissedCount) dismissed")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                            .hoverCursor(.pointingHand)
+                    Spacer()
+
+                    if showCopyAll, let copyAll = onCopyAll {
+                        CopyAllButton {
+                            copyAll()
                         }
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
                 }
-                .background(Color(NSColor.windowBackgroundColor))
+                .padding(.horizontal)
+
+                if filteredPRs.isEmpty {
+                    if prs.isEmpty {
+                        Text(emptyMessage)
+                            .foregroundColor(.secondary)
+                            .padding()
+                    } else {
+                        Text("No PRs match the selected filters")
+                            .foregroundColor(.secondary)
+                            .padding()
+                    }
+                } else {
+                    ForEach(filteredPRs) { pr in
+                        PRRow(
+                            pr: pr,
+                            onCopy: {
+                                onCopy(pr)
+                            },
+                            onDismiss: {
+                                onDismiss(pr)
+                            },
+                            onSnooze: onSnooze.map { snooze in
+                                {
+                                    snooze(pr)
+                                }
+                            },
+                            onApprove: onApprove.map { approve in
+                                {
+                                    approve(pr)
+                                }
+                            },
+                            onMerge: onMerge.map { merge in
+                                {
+                                    merge(pr)
+                                }
+                            },
+                            isMerging: mergingPRIds.contains(pr.id),
+                            onUnsnooze: onUnsnooze.map { unsnooze in
+                                {
+                                    unsnooze(pr)
+                                }
+                            },
+                            onUndismiss: onUndismiss.map { undismiss in
+                                {
+                                    undismiss(pr)
+                                }
+                            }
+                        )
+                        .padding(.horizontal)
+                    }
+                }
             }
+            .padding(.vertical)
         }
     }
 }
