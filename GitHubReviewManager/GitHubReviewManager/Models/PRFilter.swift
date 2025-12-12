@@ -112,6 +112,16 @@ struct PRFilterState: Codable, Equatable {
 
     func filter<PR: PRRowItem>(_ prs: [PR]) -> [PR] {
         prs.filter { matches($0) }
+            .sorted { pr1, pr2 in
+                // Sort by repository name first (ascending)
+                let repo1 = pr1.repoName.lowercased()
+                let repo2 = pr2.repoName.lowercased()
+                if repo1 != repo2 {
+                    return repo1 < repo2
+                }
+                // Then by age (descending - older PRs first)
+                return pr1.createdAt < pr2.createdAt
+            }
     }
 }
 

@@ -77,29 +77,35 @@ class TrayMenuManager {
         if popover.isShown {
             popover.performClose(sender)
         } else {
-            // Show popover relative to status item button
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            showPopoverInternal(button: button, popover: popover)
+        }
+    }
 
-            // Configure window to accept mouse clicks even when not focused
-            // Use a small delay to ensure window is shown first
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                if let window = popover.contentViewController?.view.window {
-                    window.acceptsMouseMovedEvents = true
-                    // Allow window to receive mouse clicks even when not key
-                    window.ignoresMouseEvents = false
-                    // Make the window key so it receives focus and hover events work
-                    window.makeKey()
-                }
-            }
+    func showPopover() {
+        guard let button = statusItem?.button, let popover = popover else { return }
 
-            // Add Esc key handler to close popover
-            NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                if event.keyCode == 53 { // Esc key
-                    popover.performClose(nil)
-                    return nil
-                }
-                return event
+        if !popover.isShown {
+            showPopoverInternal(button: button, popover: popover)
+        }
+    }
+
+    private func showPopoverInternal(button: NSStatusBarButton, popover: NSPopover) {
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            if let window = popover.contentViewController?.view.window {
+                window.acceptsMouseMovedEvents = true
+                window.ignoresMouseEvents = false
+                window.makeKey()
             }
+        }
+
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            if event.keyCode == 53 {
+                popover.performClose(nil)
+                return nil
+            }
+            return event
         }
     }
 }

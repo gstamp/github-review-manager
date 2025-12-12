@@ -158,6 +158,7 @@ protocol PRRowItem {
     var url: String { get }
     var repoOwner: String { get }
     var repoName: String { get }
+    var createdAt: String { get }
     var state: PRState { get }
     var reviewStatus: ReviewStatus { get }
     var statusState: StatusState? { get }
