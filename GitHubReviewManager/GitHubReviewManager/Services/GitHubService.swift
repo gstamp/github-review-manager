@@ -569,7 +569,11 @@ class GitHubService {
             ... on PullRequest {
               state
               merged
-              reviewDecision
+              reviews(last: 100) {
+                nodes {
+                  state
+                }
+              }
               mergeQueueEntry {
                 state
                 position
@@ -598,10 +602,18 @@ class GitHubService {
         struct SinglePRNode: Decodable {
             let state: String
             let merged: Bool
-            let reviewDecision: String?
+            let reviews: SinglePRReviews
             let mergeQueueEntry: MergeQueueEntryNode?
             let mergeable: MergeableState?
             let commits: Commits
+        }
+
+        struct SinglePRReviews: Decodable {
+            let nodes: [SinglePRReviewNode]
+        }
+
+        struct SinglePRReviewNode: Decodable {
+            let state: String
         }
 
         let response: GraphQLResponse<SinglePRStateResponse> = try await executeGraphQL(
@@ -628,17 +640,18 @@ class GitHubService {
             return StatusState(rawValue: state.lowercased())
         }()
 
+        // Determine review status from the latest review (same logic as getReviewRequests)
         let reviewStatus: ReviewStatus = {
-            guard let decision = node.reviewDecision else {
+            guard let latestReview = node.reviews.nodes.last else {
                 return .waiting
             }
-            switch decision {
+            switch latestReview.state {
             case "APPROVED":
                 return .approved
             case "CHANGES_REQUESTED":
                 return .changesRequested
-            case "REVIEW_REQUIRED":
-                return .waiting
+            case "COMMENTED":
+                return .commented
             default:
                 return .waiting
             }
