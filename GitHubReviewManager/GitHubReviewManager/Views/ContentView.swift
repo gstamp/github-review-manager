@@ -46,6 +46,17 @@ struct ContentView: View {
         }
     }
 
+    private func filteredMyPRsCount() -> Int {
+        let state = filterStates["myPRs"] ?? PRFilterState()
+        return state.filter(viewModel.allUserPRsForDisplay).count
+    }
+
+    private func filteredCategoryCount(for category: String) -> Int {
+        let tabKey = "category_\(category)"
+        let state = filterStates[tabKey] ?? PRFilterState()
+        return state.filter(viewModel.allRequestsForDisplay(category: category)).count
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Header
@@ -125,10 +136,11 @@ struct ContentView: View {
                             }
                         },
                         showCopyAll: !viewModel.userPRs.isEmpty,
-                        onCopyAll: {
-                            let messages = viewModel.userPRs.map { SlackFormatter.formatMessage(pr: $0) }
+                        onCopyAll: { visiblePRs in
+                            let messages = visiblePRs.map { SlackFormatter.formatMessage(pr: $0) }
                             SlackFormatter.copyToClipboard(messages.joined(separator: "\n"))
                         },
+                        draftCount: viewModel.getDraftCount(for: viewModel.userPRs),
                         snoozedCount: viewModel.getSnoozedCount(for: viewModel.userPRs),
                         dismissedCount: viewModel.getDismissedCount(for: viewModel.userPRs),
                         mergingPRIds: viewModel.mergingPRIds,
@@ -148,7 +160,7 @@ struct ContentView: View {
                         }
                     )
                     .tabItem {
-                        Text("My PRs (\(viewModel.myPRsCount))")
+                        Text("My PRs (\(filteredMyPRsCount()))")
                     }
                     .tag(TabIdentifier.myPRs)
 
@@ -180,11 +192,11 @@ struct ContentView: View {
                                     await viewModel.requestMergePR(request.request)
                                 }
                             },
-                            showCopyAll: !group.requests.isEmpty,
-                            onCopyAll: {
-                                let messages = group.requests.map { SlackFormatter.formatMessage(pr: $0) }
-                                SlackFormatter.copyToClipboard(messages.joined(separator: "\n"))
-                            },
+                        showCopyAll: !group.requests.isEmpty,
+                        onCopyAll: { visibleRequests in
+                            let messages = visibleRequests.map { SlackFormatter.formatMessage(pr: $0) }
+                            SlackFormatter.copyToClipboard(messages.joined(separator: "\n"))
+                        },
                             snoozedCount: viewModel.getSnoozedCount(for: group.requests, category: group.category),
                             dismissedCount: viewModel.getDismissedCount(for: group.requests, category: group.category),
                             mergingPRIds: viewModel.mergingPRIds,
@@ -203,7 +215,7 @@ struct ContentView: View {
                             }
                         )
                         .tabItem {
-                            Text("\(group.categoryLabel) (\(group.requests.count))")
+                            Text("\(group.categoryLabel) (\(filteredCategoryCount(for: group.category)))")
                         }
                         .tag(TabIdentifier.category(group.category))
                     }
@@ -379,6 +391,10 @@ class PRViewModel: ObservableObject {
         let dismissedIds = Set(storageService.getDismissedPRIds())
         let categoryRequestIds = Set(allReviewRequests.filter { $0.reviewCategory == category }.map { $0.id })
         return dismissedIds.intersection(categoryRequestIds).count
+    }
+
+    func getDraftCount(for prs: [PRSummary]) -> Int {
+        allUserPRs.filter { $0.isDraft }.count
     }
 
     var categoryGroups: [CategoryGroup] {

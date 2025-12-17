@@ -4,6 +4,7 @@ struct FilterBar: View {
     @Binding var filterState: PRFilterState
     let onFilterChanged: () -> Void
     var showDraftsToggle: Bool = false
+    var draftCount: Int = 0
     var snoozedCount: Int = 0
     var dismissedCount: Int = 0
 
@@ -20,12 +21,12 @@ struct FilterBar: View {
                 )
             }
 
-            if showDraftsToggle {
+            if showDraftsToggle && draftCount > 0 {
                 Button(action: {
                     filterState.showDrafts.toggle()
                     onFilterChanged()
                 }) {
-                    Text("Drafts")
+                    Text("Drafts (\(draftCount))")
                         .font(.caption2)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 3)

@@ -10,7 +10,8 @@ struct PRListView<PR: PRRowItem & Identifiable>: View {
     let onApprove: ((PR) -> Void)?
     let onMerge: ((PR) -> Void)?
     let showCopyAll: Bool
-    let onCopyAll: (() -> Void)?
+    let onCopyAll: (([PR]) -> Void)?
+    let draftCount: Int
     let snoozedCount: Int
     let dismissedCount: Int
     let mergingPRIds: Set<Int>
@@ -30,7 +31,8 @@ struct PRListView<PR: PRRowItem & Identifiable>: View {
         onApprove: ((PR) -> Void)? = nil,
         onMerge: ((PR) -> Void)? = nil,
         showCopyAll: Bool = false,
-        onCopyAll: (() -> Void)? = nil,
+        onCopyAll: (([PR]) -> Void)? = nil,
+        draftCount: Int = 0,
         snoozedCount: Int = 0,
         dismissedCount: Int = 0,
         mergingPRIds: Set<Int> = [],
@@ -50,6 +52,7 @@ struct PRListView<PR: PRRowItem & Identifiable>: View {
         self.onMerge = onMerge
         self.showCopyAll = showCopyAll
         self.onCopyAll = onCopyAll
+        self.draftCount = draftCount
         self.snoozedCount = snoozedCount
         self.dismissedCount = dismissedCount
         self.mergingPRIds = mergingPRIds
@@ -74,6 +77,7 @@ struct PRListView<PR: PRRowItem & Identifiable>: View {
                         filterState: $filterState,
                         onFilterChanged: onFilterChanged,
                         showDraftsToggle: showDraftsToggle,
+                        draftCount: draftCount,
                         snoozedCount: snoozedCount,
                         dismissedCount: dismissedCount
                     )
@@ -82,7 +86,7 @@ struct PRListView<PR: PRRowItem & Identifiable>: View {
 
                     if showCopyAll, let copyAll = onCopyAll {
                         CopyAllButton {
-                            copyAll()
+                            copyAll(filteredPRs)
                         }
                     }
                 }

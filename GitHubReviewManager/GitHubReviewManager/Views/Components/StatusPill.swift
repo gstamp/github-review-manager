@@ -84,7 +84,7 @@ struct ConflictPill: View {
 
 struct DraftPill: View {
     var body: some View {
-        StatusPill(text: "draft", color: Color.gray)
+        StatusPill(text: "draft", color: Color.purple)
     }
 }
 
